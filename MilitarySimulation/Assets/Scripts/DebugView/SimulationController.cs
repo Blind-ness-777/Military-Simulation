@@ -6,8 +6,9 @@ using UnityEngine.InputSystem;
 namespace MilitarySimulation.DebugView
 {
     /// <summary>
-    /// 디버그용 컨트롤러. 시뮬레이션 틱 진행, 일시정지·배속, 임시 명령 입력을 담당한다.
-    /// 명령 입력은 엔진 검증용 임시 조작이며, 실제 명령 UI(드래그 경로, 경계 부채꼴)는 이후 단계에서 만든다.
+    /// 디버그용 컨트롤러. 시뮬레이션 틱 진행, 일시정지·배속, 명령 입력을 담당한다.
+    /// 명령은 지도 마우스 조작과 DebugUnitView의 명령 패널 버튼에서 들어온다.
+    /// 패널 버튼은 IMGUI(OnGUI)에서 눌리므로, 명령 처리 메서드를 public으로 열어 두고 뷰가 호출한다.
     /// </summary>
     [RequireComponent(typeof(DebugMapView))]
     [RequireComponent(typeof(DebugUnitView))]
@@ -16,6 +17,9 @@ namespace MilitarySimulation.DebugView
         private const int MaxTicksPerFrame = 50;
         private const int MaxSpeedSteps = 9;
         private const float DefaultWatchArcDegrees = 90f;
+
+        /// <summary>좌클릭으로 소대를 고를 때 허용하는 화면상 거리(픽셀).</summary>
+        private const float SelectPickRadiusPixels = 24f;
 
         [SerializeField] private int _seed = 12345;
 
@@ -37,14 +41,22 @@ namespace MilitarySimulation.DebugView
 
         public Simulation Simulation => _simulation;
         public Side PlayerSide => Side.Blue;
+        public IReadOnlyList<Platoon> FriendlyPlatoons => _friendlyPlatoons;
         public bool IsPaused { get; private set; } = true;
         public float Speed => _speedSteps[_speedIndex];
         public int SpeedStepCount => Mathf.Min(_speedSteps.Length, MaxSpeedSteps);
+
+        /// <summary>다음 이동 명령에 붙는 이동 방식. 이미 내린 명령에는 영향이 없다.</summary>
         public MoveMode OrderMoveMode { get; private set; } = MoveMode.Normal;
+
+        /// <summary>다음 이동 명령에 붙는 접촉 시 행동. 이미 내린 명령에는 영향이 없다.</summary>
         public ContactBehavior OrderContactBehavior { get; private set; } = ContactBehavior.TakeCover;
 
         /// <summary>true면 실제 전황(적 위치)까지 표시한다. 디버그 전용.</summary>
         public bool ShowTruth { get; private set; }
+
+        /// <summary>경계 버튼을 누른 뒤, 지도에서 방향을 찍기를 기다리는 중인지.</summary>
+        public bool IsTargetingWatch { get; private set; }
 
         public Platoon SelectedPlatoon => _friendlyPlatoons.Count > 0 ? _friendlyPlatoons[_selectedIndex] : null;
 
@@ -97,6 +109,63 @@ namespace MilitarySimulation.DebugView
             _unitView.Refresh();
         }
 
+        public void SelectPlatoon(Platoon platoon)
+        {
+            int index = _friendlyPlatoons.IndexOf(platoon);
+            if (index < 0)
+            {
+                return;
+            }
+
+            _selectedIndex = index;
+            IsTargetingWatch = false;
+        }
+
+        public void SetOrderMoveMode(MoveMode moveMode)
+        {
+            OrderMoveMode = moveMode;
+        }
+
+        public void SetOrderContactBehavior(ContactBehavior contactBehavior)
+        {
+            OrderContactBehavior = contactBehavior;
+        }
+
+        /// <summary>사격 방침은 다음 명령이 아니라 선택한 소대에 즉시 적용한다.</summary>
+        public void SetSelectedFirePolicy(FirePolicy firePolicy)
+        {
+            Platoon selected = SelectedPlatoon;
+            if (selected == null || selected.FirePolicy == firePolicy)
+            {
+                return;
+            }
+
+            _simulation.OrderFirePolicy(selected, firePolicy);
+        }
+
+        public void BeginWatchTargeting()
+        {
+            if (SelectedPlatoon != null)
+            {
+                IsTargetingWatch = true;
+            }
+        }
+
+        public void CancelWatchTargeting()
+        {
+            IsTargetingWatch = false;
+        }
+
+        public void HoldSelected()
+        {
+            Platoon selected = SelectedPlatoon;
+            if (selected != null)
+            {
+                IsTargetingWatch = false;
+                _simulation.OrderHold(selected);
+            }
+        }
+
         private void HandleKeyboard()
         {
             Keyboard keyboard = Keyboard.current;
@@ -121,17 +190,7 @@ namespace MilitarySimulation.DebugView
 
             if (keyboard.tabKey.wasPressedThisFrame && _friendlyPlatoons.Count > 0)
             {
-                _selectedIndex = (_selectedIndex + 1) % _friendlyPlatoons.Count;
-            }
-
-            if (keyboard.mKey.wasPressedThisFrame)
-            {
-                OrderMoveMode = (MoveMode)(((int)OrderMoveMode + 1) % 3);
-            }
-
-            if (keyboard.cKey.wasPressedThisFrame)
-            {
-                OrderContactBehavior = (ContactBehavior)(((int)OrderContactBehavior + 1) % 3);
+                SelectPlatoon(_friendlyPlatoons[(_selectedIndex + 1) % _friendlyPlatoons.Count]);
             }
 
             if (keyboard.tKey.wasPressedThisFrame)
@@ -139,46 +198,104 @@ namespace MilitarySimulation.DebugView
                 ShowTruth = !ShowTruth;
             }
 
-            Platoon selected = SelectedPlatoon;
-            if (selected == null)
+            if (keyboard.escapeKey.wasPressedThisFrame)
             {
-                return;
+                CancelWatchTargeting();
             }
 
             if (keyboard.hKey.wasPressedThisFrame)
             {
-                _simulation.OrderHold(selected);
-            }
-
-            if (keyboard.fKey.wasPressedThisFrame)
-            {
-                var nextPolicy = (FirePolicy)(((int)selected.FirePolicy + 1) % 3);
-                _simulation.OrderFirePolicy(selected, nextPolicy);
-            }
-
-            if (keyboard.wKey.wasPressedThisFrame && TryGetMouseMapPosition(out Vec2 lookAt))
-            {
-                float bearing = Bearing.Between(selected.Position, lookAt);
-                _simulation.OrderWatch(selected, bearing, DefaultWatchArcDegrees);
+                HoldSelected();
             }
         }
 
         private void HandleMouse()
         {
             Mouse mouse = Mouse.current;
-            Platoon selected = SelectedPlatoon;
-            if (mouse == null || selected == null || !mouse.rightButton.wasPressedThisFrame)
+            if (mouse == null)
             {
                 return;
             }
 
-            if (!TryGetMouseMapPosition(out Vec2 destination))
+            bool leftPressed = mouse.leftButton.wasPressedThisFrame;
+            bool rightPressed = mouse.rightButton.wasPressedThisFrame;
+            if (!leftPressed && !rightPressed)
+            {
+                return;
+            }
+
+            // 패널 위의 클릭은 IMGUI 버튼이 처리한다. 지도 명령으로 새지 않게 막는다.
+            Vector2 screenPosition = mouse.position.ReadValue();
+            if (_unitView.IsPointerOverUi(screenPosition))
+            {
+                return;
+            }
+
+            if (IsTargetingWatch)
+            {
+                HandleWatchTargetingClick(leftPressed);
+                return;
+            }
+
+            if (leftPressed)
+            {
+                TrySelectPlatoonAt(screenPosition);
+                return;
+            }
+
+            Platoon selected = SelectedPlatoon;
+            if (selected == null || !HasCursorMapPosition)
             {
                 return;
             }
 
             bool append = Keyboard.current != null && Keyboard.current.shiftKey.isPressed;
-            _simulation.OrderMove(selected, new[] { destination }, OrderMoveMode, append, OrderContactBehavior);
+            _simulation.OrderMove(selected, new[] { CursorMapPosition }, OrderMoveMode, append, OrderContactBehavior);
+        }
+
+        /// <summary>경계 방향 지정 중: 좌클릭은 그 방향으로 경계, 우클릭은 취소.</summary>
+        private void HandleWatchTargetingClick(bool leftPressed)
+        {
+            Platoon selected = SelectedPlatoon;
+            IsTargetingWatch = false;
+            if (!leftPressed || selected == null || !HasCursorMapPosition)
+            {
+                return;
+            }
+
+            float bearing = Bearing.Between(selected.Position, CursorMapPosition);
+            _simulation.OrderWatch(selected, bearing, DefaultWatchArcDegrees);
+        }
+
+        private void TrySelectPlatoonAt(Vector2 screenPosition)
+        {
+            if (_camera == null)
+            {
+                return;
+            }
+
+            Platoon nearest = null;
+            float nearestDistance = SelectPickRadiusPixels;
+            foreach (Platoon platoon in _friendlyPlatoons)
+            {
+                Vector3 screen = _camera.WorldToScreenPoint(WorldMapping.ToWorld(platoon.Position));
+                if (screen.z < 0f)
+                {
+                    continue;
+                }
+
+                float distance = Vector2.Distance(screenPosition, new Vector2(screen.x, screen.y));
+                if (distance < nearestDistance)
+                {
+                    nearest = platoon;
+                    nearestDistance = distance;
+                }
+            }
+
+            if (nearest != null)
+            {
+                SelectPlatoon(nearest);
+            }
         }
 
         private void UpdateCursor()

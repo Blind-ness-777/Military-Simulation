@@ -10,6 +10,7 @@ namespace MilitarySimulation.DebugView
     /// 기본은 플레이어 진영 정보만 보여주고(안개), ShowTruth일 때만 실제 적 위치를 함께 그린다.
     /// Gizmos 대신 메시를 쓰는 이유: Gizmos는 Game 뷰의 Gizmos 버튼 상태에 따라 보이지 않을 수 있다.
     /// 매 프레임 갱신은 SimulationController가 Refresh()를 호출해서 한다.
+    /// 명령 패널(RTS 커맨드 카드 방식)도 여기서 그리고, 버튼 입력은 컨트롤러의 명령 메서드로 넘긴다.
     /// </summary>
     public class DebugUnitView : MonoBehaviour
     {
@@ -20,6 +21,10 @@ namespace MilitarySimulation.DebugView
         private const float WatchArcAlpha = 0.3f;
         private const int LostContactFadeSeconds = 300;
         private const int CircleSegments = 16;
+        private const float CommandPanelWidth = 400f;
+        private const float CommandPanelHeight = 190f;
+        private const float PanelMargin = 10f;
+        private const float RowLabelWidth = 96f;
 
         [SerializeField] private float _markerSize = 18f;
         [SerializeField] private int _logLineCount = 14;
@@ -28,7 +33,13 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _contactColor = new Color(0.95f, 0.2f, 0.2f);
         [SerializeField] private Color _truthColor = new Color(1f, 0.3f, 1f);
         [SerializeField] private Color _fireColor = new Color(1f, 0.6f, 0.1f);
+        [SerializeField] private Color _activeButtonColor = new Color(1f, 0.85f, 0.3f);
 
+        /// <summary>
+        /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
+        /// 컨트롤러가 이 영역 위의 클릭을 지도 명령으로 처리하지 않게 하는 데 쓴다.
+        /// </summary>
+        private readonly List<Rect> _uiRects = new List<Rect>();
         private readonly List<string> _logBuffer = new List<string>();
         private readonly StringBuilder _textBuilder = new StringBuilder();
         private readonly List<Vector3> _vertices = new List<Vector3>();
@@ -72,12 +83,32 @@ namespace MilitarySimulation.DebugView
                 AddTruth(simulation);
             }
 
+            AddWatchTargetingPreview();
+
             _mesh.Clear();
             _mesh.SetVertices(_vertices);
             _mesh.SetColors(_colors);
             _mesh.subMeshCount = 2;
             _mesh.SetIndices(_lineIndices, MeshTopology.Lines, 0);
             _mesh.SetIndices(_triangleIndices, MeshTopology.Triangles, 1);
+        }
+
+        /// <summary>
+        /// 화면 좌표(Input System 기준: 왼쪽 아래 원점)가 패널 위에 있는지.
+        /// 영역은 직전 OnGUI에서 그린 것이라 한 프레임 늦을 수 있지만, 패널은 거의 움직이지 않아 문제가 없다.
+        /// </summary>
+        public bool IsPointerOverUi(Vector2 screenPosition)
+        {
+            var guiPoint = new Vector2(screenPosition.x, Screen.height - screenPosition.y);
+            foreach (Rect rect in _uiRects)
+            {
+                if (rect.Contains(guiPoint))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void OnDestroy()
@@ -283,6 +314,21 @@ namespace MilitarySimulation.DebugView
             AddLine(origin, origin + center * WatchDirectionLineLength, WithAlpha(color, 0.8f));
         }
 
+        /// <summary>경계 방향 지정 중이면 선택 소대에서 커서까지 미리보기 선을 그린다.</summary>
+        private void AddWatchTargetingPreview()
+        {
+            Platoon selected = _controller.SelectedPlatoon;
+            if (!_controller.IsTargetingWatch || selected == null || !_controller.HasCursorMapPosition)
+            {
+                return;
+            }
+
+            AddLine(
+                WorldMapping.ToWorld(selected.Position, MarkerHeight),
+                WorldMapping.ToWorld(_controller.CursorMapPosition, MarkerHeight),
+                _selectedColor);
+        }
+
         private void AddLine(Vector3 from, Vector3 to, Color color)
         {
             _lineIndices.Add(AddVertex(from, color));
@@ -362,11 +408,147 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
+            // OnGUI는 한 프레임에 여러 번(Layout, Repaint, 입력 이벤트) 불리므로 매번 같은 영역을 다시 채운다.
+            _uiRects.Clear();
             EnsureStyles();
             Simulation simulation = _controller.Simulation;
             DrawLabels(simulation);
             DrawStatusPanel(simulation);
             DrawLogPanel(simulation);
+            DrawCommandPanel();
+        }
+
+        private void DrawCommandPanel()
+        {
+            var area = new Rect(
+                Screen.width - CommandPanelWidth - PanelMargin,
+                Screen.height - CommandPanelHeight - PanelMargin,
+                CommandPanelWidth,
+                CommandPanelHeight);
+            _uiRects.Add(area);
+
+            GUILayout.BeginArea(area, GUI.skin.box);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("소대", GUILayout.Width(RowLabelWidth));
+            foreach (Platoon platoon in _controller.FriendlyPlatoons)
+            {
+                if (CommandButton(platoon.Name, platoon == _controller.SelectedPlatoon))
+                {
+                    _controller.SelectPlatoon(platoon);
+                }
+            }
+
+            GUILayout.EndHorizontal();
+
+            Platoon selected = _controller.SelectedPlatoon;
+            bool canCommand = selected != null && !selected.IsDestroyed && !selected.IsBroken;
+            GUI.enabled = canCommand;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("이동 방식", GUILayout.Width(RowLabelWidth));
+            DrawMoveModeButton(MoveMode.Fast);
+            DrawMoveModeButton(MoveMode.Normal);
+            DrawMoveModeButton(MoveMode.Stealth);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("접촉 시", GUILayout.Width(RowLabelWidth));
+            DrawContactBehaviorButton(ContactBehavior.TakeCover);
+            DrawContactBehaviorButton(ContactBehavior.PushThrough);
+            DrawContactBehaviorButton(ContactBehavior.FallBack);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("사격 방침", GUILayout.Width(RowLabelWidth));
+            DrawFirePolicyButton(selected, FirePolicy.Free);
+            DrawFirePolicyButton(selected, FirePolicy.CloseOnly);
+            DrawFirePolicyButton(selected, FirePolicy.HoldFire);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("명령", GUILayout.Width(RowLabelWidth));
+            if (CommandButton("경계 방향 지정", _controller.IsTargetingWatch))
+            {
+                if (_controller.IsTargetingWatch)
+                {
+                    _controller.CancelWatchTargeting();
+                }
+                else
+                {
+                    _controller.BeginWatchTargeting();
+                }
+            }
+
+            if (CommandButton("정지", false))
+            {
+                _controller.HoldSelected();
+            }
+
+            GUILayout.EndHorizontal();
+            GUI.enabled = true;
+
+            GUILayout.Label(GetCommandHint(selected));
+            GUILayout.EndArea();
+        }
+
+        private void DrawMoveModeButton(MoveMode moveMode)
+        {
+            if (CommandButton(DisplayNames.Of(moveMode), _controller.OrderMoveMode == moveMode))
+            {
+                _controller.SetOrderMoveMode(moveMode);
+            }
+        }
+
+        private void DrawContactBehaviorButton(ContactBehavior contactBehavior)
+        {
+            if (CommandButton(DisplayNames.Of(contactBehavior), _controller.OrderContactBehavior == contactBehavior))
+            {
+                _controller.SetOrderContactBehavior(contactBehavior);
+            }
+        }
+
+        private void DrawFirePolicyButton(Platoon selected, FirePolicy firePolicy)
+        {
+            bool isActive = selected != null && selected.FirePolicy == firePolicy;
+            if (CommandButton(DisplayNames.Of(firePolicy), isActive))
+            {
+                _controller.SetSelectedFirePolicy(firePolicy);
+            }
+        }
+
+        /// <summary>현재 값인 버튼은 배경색을 바꿔 강조한다.</summary>
+        private bool CommandButton(string text, bool isActive)
+        {
+            Color previous = GUI.backgroundColor;
+            if (isActive)
+            {
+                GUI.backgroundColor = _activeButtonColor;
+            }
+
+            bool clicked = GUILayout.Button(text);
+            GUI.backgroundColor = previous;
+            return clicked;
+        }
+
+        private string GetCommandHint(Platoon selected)
+        {
+            if (selected == null)
+            {
+                return "선택된 소대 없음";
+            }
+
+            if (selected.IsDestroyed || selected.IsBroken)
+            {
+                return $"{selected.Name}: 명령 불가 ({(selected.IsDestroyed ? "전투 불능" : "사기 붕괴")})";
+            }
+
+            if (_controller.IsTargetingWatch)
+            {
+                return "지도를 좌클릭해 경계 방향 지정 (우클릭·Esc 취소)";
+            }
+
+            return "이동 방식·접촉 시는 다음 이동 명령에, 사격 방침은 즉시 적용";
         }
 
         private void EnsureStyles()
@@ -429,16 +611,17 @@ namespace MilitarySimulation.DebugView
             Platoon selected = _controller.SelectedPlatoon;
             _textBuilder.Clear();
             _textBuilder.AppendLine($"{simulation.FormatClock(simulation.ElapsedSeconds)}   x{_controller.Speed:0}   {(_controller.IsPaused ? "■ 일시정지" : "▶ 진행")}");
-            _textBuilder.AppendLine($"선택: {(selected != null ? $"{selected.Name} (사격 방침: {DisplayNames.Of(selected.FirePolicy)})" : "-")}");
-            _textBuilder.AppendLine($"다음 이동 명령: {DisplayNames.Of(_controller.OrderMoveMode)}, 접촉 시 {DisplayNames.Of(_controller.OrderContactBehavior)}");
+            _textBuilder.AppendLine($"선택: {(selected != null ? selected.Name : "-")}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine(GetCursorText(simulation));
             _textBuilder.AppendLine();
-            _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 소대 선택");
-            _textBuilder.AppendLine("우클릭 이동 (Shift 경로 추가) · M 이동 방식 · C 접촉 시 행동");
-            _textBuilder.AppendLine("W 마우스 방향 경계 · H 정지 · F 사격 방침 · T 실제 전황");
+            _textBuilder.AppendLine("좌클릭 소대 선택 · 우클릭 이동 (Shift 경로 추가)");
+            _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 다음 소대");
+            _textBuilder.AppendLine("H 정지 · T 실제 전황 · Esc 취소");
 
-            GUI.Box(new Rect(10f, 10f, 430f, 178f), _textBuilder.ToString(), _panelStyle);
+            var rect = new Rect(PanelMargin, PanelMargin, 430f, 160f);
+            _uiRects.Add(rect);
+            GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
         }
 
         private void DrawLogPanel(Simulation simulation)
@@ -465,7 +648,11 @@ namespace MilitarySimulation.DebugView
             }
 
             float height = 20f + _logLineCount * 18f;
-            GUI.Box(new Rect(10f, Screen.height - height - 10f, 560f, height), _textBuilder.ToString(), _panelStyle);
+            // 오른쪽 아래 명령 패널과 겹치지 않도록 폭을 화면에 맞춰 줄인다.
+            float width = Mathf.Min(560f, Screen.width - CommandPanelWidth - PanelMargin * 3f);
+            var rect = new Rect(PanelMargin, Screen.height - height - PanelMargin, width, height);
+            _uiRects.Add(rect);
+            GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
         }
 
         private static string GetStateText(Platoon platoon)
