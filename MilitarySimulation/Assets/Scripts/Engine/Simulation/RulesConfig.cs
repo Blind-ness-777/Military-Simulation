@@ -39,6 +39,12 @@ namespace MilitarySimulation.Engine
         public float ObserverWatchInArcMultiplier = 1.8f;
         public float ObserverWatchOutOfArcMultiplier = 0.5f;
 
+        /// <summary>
+        /// 나를 쏘고 있는 적을 찾을 때의 보정. 총성과 섬광, 탄착으로 방향을 바로 알 수 있어서 크게 준다.
+        /// (이 보정이 없으면 이동 중 피격 시 평균 17~30초 동안 응사하지 못했다.)
+        /// </summary>
+        public float ObserverUnderFireFromTargetMultiplier = 10f;
+
         /// <summary>시야선이 끊긴 확인 접촉이 "소실"로 바뀌기까지의 시간(초).</summary>
         public int ContactLostSeconds = 30;
 

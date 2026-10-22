@@ -155,6 +155,12 @@ namespace MilitarySimulation.Engine
                 * GetTargetMultiplier(target)
                 * GetObserverMultiplier(observer, bearingToTarget);
 
+            // 표적이 직전 틱에 바로 이 관측자를 쏘고 있었다면, 관측자는 사격 방향을 알고 있다.
+            if (target.IsFiring && target.CurrentTargetId == observer.Id)
+            {
+                perMinute *= Rules.ObserverUnderFireFromTargetMultiplier;
+            }
+
             return PerMinuteToPerTick(perMinute);
         }
 
