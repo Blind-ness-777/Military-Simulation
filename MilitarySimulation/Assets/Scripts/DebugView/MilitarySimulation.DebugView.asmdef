@@ -1,0 +1,17 @@
+{
+    "name": "MilitarySimulation.DebugView",
+    "rootNamespace": "MilitarySimulation.DebugView",
+    "references": [
+        "MilitarySimulation.Engine",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
