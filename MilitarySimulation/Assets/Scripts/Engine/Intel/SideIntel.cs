@@ -20,7 +20,8 @@ namespace MilitarySimulation.Engine
         /// <summary>등록 순서대로 정렬된 접촉 목록.</summary>
         public IReadOnlyList<Contact> Contacts => _contacts;
 
-        internal bool TryGetContact(int targetId, out Contact contact)
+        /// <summary>실제 부대 Id로 접촉을 찾는다. 사격선 표시처럼 엔진이 아는 표적을 진영 정보로 옮길 때 쓴다.</summary>
+        public bool TryGetContact(int targetId, out Contact contact)
         {
             return _contactsByTarget.TryGetValue(targetId, out contact);
         }

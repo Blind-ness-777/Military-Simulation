@@ -33,6 +33,7 @@ namespace MilitarySimulation.DebugView
         public bool IsPaused { get; private set; } = true;
         public float Speed => SpeedSteps[_speedIndex];
         public MoveMode OrderMoveMode { get; private set; } = MoveMode.Normal;
+        public ContactBehavior OrderContactBehavior { get; private set; } = ContactBehavior.TakeCover;
 
         /// <summary>true면 실제 전황(적 위치)까지 표시한다. 디버그 전용.</summary>
         public bool ShowTruth { get; private set; }
@@ -101,6 +102,11 @@ namespace MilitarySimulation.DebugView
                 OrderMoveMode = (MoveMode)(((int)OrderMoveMode + 1) % 3);
             }
 
+            if (keyboard.cKey.wasPressedThisFrame)
+            {
+                OrderContactBehavior = (ContactBehavior)(((int)OrderContactBehavior + 1) % 3);
+            }
+
             if (keyboard.tKey.wasPressedThisFrame)
             {
                 ShowTruth = !ShowTruth;
@@ -115,6 +121,12 @@ namespace MilitarySimulation.DebugView
             if (keyboard.hKey.wasPressedThisFrame)
             {
                 _simulation.OrderHold(selected);
+            }
+
+            if (keyboard.fKey.wasPressedThisFrame)
+            {
+                var nextPolicy = (FirePolicy)(((int)selected.FirePolicy + 1) % 3);
+                _simulation.OrderFirePolicy(selected, nextPolicy);
             }
 
             if (keyboard.wKey.wasPressedThisFrame && TryGetMouseMapPosition(out Vec2 lookAt))
@@ -139,7 +151,7 @@ namespace MilitarySimulation.DebugView
             }
 
             bool append = Keyboard.current != null && Keyboard.current.shiftKey.isPressed;
-            _simulation.OrderMove(selected, new[] { destination }, OrderMoveMode, append);
+            _simulation.OrderMove(selected, new[] { destination }, OrderMoveMode, append, OrderContactBehavior);
         }
 
         private void AdvanceSimulation()
