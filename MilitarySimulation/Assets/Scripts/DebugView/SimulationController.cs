@@ -13,11 +13,18 @@ namespace MilitarySimulation.DebugView
     [RequireComponent(typeof(DebugUnitView))]
     public class SimulationController : MonoBehaviour
     {
-        private static readonly float[] SpeedSteps = { 1f, 3f, 10f };
         private const int MaxTicksPerFrame = 50;
+        private const int MaxSpeedSteps = 9;
         private const float DefaultWatchArcDegrees = 90f;
 
         [SerializeField] private int _seed = 12345;
+
+        /// <summary>
+        /// 배속 단계(실제 1초당 게임 시간 초). 숫자키 1부터 순서대로 대응하며 최대 9단계.
+        /// 배속은 시간 흐름만 바꾸고 판정 결과에는 영향이 없다(틱 단위로 진행하므로).
+        /// </summary>
+        [SerializeField] private float[] _speedSteps = { 2f, 5f, 10f, 20f };
+        [SerializeField] private int _startSpeedIndex = 1;
 
         private readonly List<Platoon> _friendlyPlatoons = new List<Platoon>();
         private Simulation _simulation;
@@ -31,7 +38,8 @@ namespace MilitarySimulation.DebugView
         public Simulation Simulation => _simulation;
         public Side PlayerSide => Side.Blue;
         public bool IsPaused { get; private set; } = true;
-        public float Speed => SpeedSteps[_speedIndex];
+        public float Speed => _speedSteps[_speedIndex];
+        public int SpeedStepCount => Mathf.Min(_speedSteps.Length, MaxSpeedSteps);
         public MoveMode OrderMoveMode { get; private set; } = MoveMode.Normal;
         public ContactBehavior OrderContactBehavior { get; private set; } = ContactBehavior.TakeCover;
 
@@ -44,6 +52,15 @@ namespace MilitarySimulation.DebugView
         {
             _mapView = GetComponent<DebugMapView>();
             _unitView = GetComponent<DebugUnitView>();
+
+            // Inspector에서 배열을 비우면 배속 접근이 바로 터지므로, 여기서 한 번만 바로잡는다.
+            if (_speedSteps == null || _speedSteps.Length == 0)
+            {
+                Debug.LogError("[SimulationController] 배속 단계가 비어 있어 1배속 하나로 대체합니다.");
+                _speedSteps = new[] { 1f };
+            }
+
+            _speedIndex = Mathf.Clamp(_startSpeedIndex, 0, SpeedStepCount - 1);
             _simulation = TestScenario.Create(_seed);
 
             foreach (Platoon platoon in _simulation.Platoons)
@@ -88,9 +105,14 @@ namespace MilitarySimulation.DebugView
                 IsPaused = !IsPaused;
             }
 
-            if (keyboard.digit1Key.wasPressedThisFrame) _speedIndex = 0;
-            if (keyboard.digit2Key.wasPressedThisFrame) _speedIndex = 1;
-            if (keyboard.digit3Key.wasPressedThisFrame) _speedIndex = 2;
+            // Key.Digit1 ~ Key.Digit9는 열거형에서 연속된 값이다.
+            for (int i = 0; i < SpeedStepCount; i++)
+            {
+                if (keyboard[Key.Digit1 + i].wasPressedThisFrame)
+                {
+                    _speedIndex = i;
+                }
+            }
 
             if (keyboard.tabKey.wasPressedThisFrame && _friendlyPlatoons.Count > 0)
             {

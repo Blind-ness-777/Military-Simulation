@@ -423,7 +423,7 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"다음 이동 명령: {DisplayNames.Of(_controller.OrderMoveMode)}, 접촉 시 {DisplayNames.Of(_controller.OrderContactBehavior)}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine();
-            _textBuilder.AppendLine("Space 일시정지 · 1/2/3 배속 · Tab 소대 선택");
+            _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 소대 선택");
             _textBuilder.AppendLine("우클릭 이동 (Shift 경로 추가) · M 이동 방식 · C 접촉 시 행동");
             _textBuilder.AppendLine("W 마우스 방향 경계 · H 정지 · F 사격 방침 · T 실제 전황");
 
