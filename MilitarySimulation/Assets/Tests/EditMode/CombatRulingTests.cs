@@ -76,6 +76,34 @@ namespace MilitarySimulation.Engine.Tests
         }
 
         [Test]
+        public void UnderFire_ShooterIsEasierToSpot()
+        {
+            // 홍 소대에서 같은 거리(300m)에 청 소대 둘. 홍은 그중 하나를 쏘고, 청은 쏘지 않는다.
+            var rules = new RulesConfig { BaseDetectionPerMinute = 100f };
+            var simulation = new Simulation(new MapData(80, 60, CellSize), rules, 3, 0);
+            Platoon red = simulation.AddPlatoon("홍", Side.Red, new Vec2(400f, 450f), 180f);
+            Platoon blueA = simulation.AddPlatoon("청A", Side.Blue, new Vec2(220f, 210f), 0f);
+            Platoon blueB = simulation.AddPlatoon("청B", Side.Blue, new Vec2(580f, 210f), 0f);
+            simulation.OrderFirePolicy(blueA, FirePolicy.HoldFire);
+            simulation.OrderFirePolicy(blueB, FirePolicy.HoldFire);
+
+            for (int i = 0; i < MaxTicks && !red.IsFiring; i++)
+            {
+                simulation.Tick();
+            }
+
+            Assert.IsTrue(red.IsFiring);
+            Platoon targeted = red.CurrentTargetId == blueA.Id ? blueA : blueB;
+            Platoon other = targeted == blueA ? blueB : blueA;
+
+            // 확률 상한(분당 0.999)에 걸려 둘이 같아지지 않도록 기본 탐지 값을 충분히 낮춰서 비교한다.
+            rules.BaseDetectionPerMinute = 0.05f;
+            Assert.Greater(
+                simulation.GetDetectionChancePerTick(targeted, red),
+                simulation.GetDetectionChancePerTick(other, red));
+        }
+
+        [Test]
         public void ContactBehavior_TakeCover_StopsOnContact()
         {
             Platoon blue = RunUntilContact(ContactBehavior.TakeCover, out _);

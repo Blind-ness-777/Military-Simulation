@@ -48,6 +48,10 @@ namespace MilitarySimulation.DebugView
 
         public Platoon SelectedPlatoon => _friendlyPlatoons.Count > 0 ? _friendlyPlatoons[_selectedIndex] : null;
 
+        /// <summary>마우스 커서가 지도 위에 있는지. HUD의 커서 정보(고도·지형) 표시에 쓴다.</summary>
+        public bool HasCursorMapPosition { get; private set; }
+        public Vec2 CursorMapPosition { get; private set; }
+
         private void Awake()
         {
             _mapView = GetComponent<DebugMapView>();
@@ -86,6 +90,7 @@ namespace MilitarySimulation.DebugView
 
         private void Update()
         {
+            UpdateCursor();
             HandleKeyboard();
             HandleMouse();
             AdvanceSimulation();
@@ -174,6 +179,12 @@ namespace MilitarySimulation.DebugView
 
             bool append = Keyboard.current != null && Keyboard.current.shiftKey.isPressed;
             _simulation.OrderMove(selected, new[] { destination }, OrderMoveMode, append, OrderContactBehavior);
+        }
+
+        private void UpdateCursor()
+        {
+            HasCursorMapPosition = TryGetMouseMapPosition(out Vec2 position);
+            CursorMapPosition = position;
         }
 
         private void AdvanceSimulation()

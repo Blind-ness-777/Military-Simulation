@@ -14,11 +14,18 @@ namespace MilitarySimulation.DebugView
 
         [SerializeField] private int _pixelsPerCell = 4;
         [SerializeField] private float _contourInterval = 5f;
-        [SerializeField] private Color _openLowColor = new Color(0.62f, 0.72f, 0.45f);
-        [SerializeField] private Color _openHighColor = new Color(0.78f, 0.70f, 0.50f);
-        [SerializeField] private Color _forestColor = new Color(0.20f, 0.40f, 0.22f);
-        [SerializeField] private Color _roadColor = new Color(0.80f, 0.74f, 0.60f);
+
+        /// <summary>굵게 그리는 계곡선(주곡선) 간격. 높이를 한눈에 세기 위한 기준선.</summary>
+        [SerializeField] private float _indexContourInterval = 25f;
+
+        // 개활지는 높이에 따라 낮음 → 중간 → 높음 세 색 사이를 보간한다(등고 채색).
+        [SerializeField] private Color _openLowColor = new Color(0.42f, 0.62f, 0.34f);
+        [SerializeField] private Color _openMidColor = new Color(0.80f, 0.76f, 0.46f);
+        [SerializeField] private Color _openHighColor = new Color(0.74f, 0.52f, 0.34f);
+        [SerializeField] private Color _forestColor = new Color(0.16f, 0.36f, 0.18f);
+        [SerializeField] private Color _roadColor = new Color(0.85f, 0.80f, 0.66f);
         [SerializeField] private Color _contourColor = new Color(0.25f, 0.20f, 0.12f);
+        [SerializeField] private float _hillShadeStrength = 2.5f;
 
         private GameObject _mapQuad;
         private Texture2D _texture;
@@ -67,9 +74,13 @@ namespace MilitarySimulation.DebugView
                     Color color = GetTerrainColor(map.GetTerrainAt(point), maxHeight > 0f ? h / maxHeight : 0f);
                     color *= GetHillShade(heights, width, height, px, py, metersPerPixel);
 
-                    if (IsContour(heights, width, px, py))
+                    if (IsContour(heights, width, height, px, py, _indexContourInterval, 1))
                     {
-                        color = Color.Lerp(color, _contourColor, 0.6f);
+                        color = Color.Lerp(color, _contourColor, 0.9f);
+                    }
+                    else if (IsContour(heights, width, height, px, py, _contourInterval, 0))
+                    {
+                        color = Color.Lerp(color, _contourColor, 0.45f);
                     }
 
                     color.a = 1f;
@@ -97,12 +108,14 @@ namespace MilitarySimulation.DebugView
                 case TerrainType.Road:
                     return _roadColor;
                 default:
-                    return Color.Lerp(_openLowColor, _openHighColor, normalizedHeight);
+                    return normalizedHeight < 0.5f
+                        ? Color.Lerp(_openLowColor, _openMidColor, normalizedHeight * 2f)
+                        : Color.Lerp(_openMidColor, _openHighColor, (normalizedHeight - 0.5f) * 2f);
             }
         }
 
         /// <summary>북서쪽 광원 기준의 간단한 음영. 경사가 눈에 보이게 하는 용도.</summary>
-        private static float GetHillShade(float[] heights, int width, int height, int px, int py, float metersPerPixel)
+        private float GetHillShade(float[] heights, int width, int height, int px, int py, float metersPerPixel)
         {
             int left = Mathf.Max(px - 1, 0);
             int right = Mathf.Min(px + 1, width - 1);
@@ -114,21 +127,41 @@ namespace MilitarySimulation.DebugView
 
             // 면의 법선 ∝ (-dx, -dy, 1), 광원 방향 ∝ (-1, +1)(북서) → 내적 ∝ dx - dy.
             // 북서쪽을 향한 경사는 밝게, 남동쪽을 향한 경사는 어둡게
-            float shade = 1f + (dx - dy) * 1.5f;
-            return Mathf.Clamp(shade, 0.7f, 1.15f);
+            float shade = 1f + (dx - dy) * _hillShadeStrength;
+            return Mathf.Clamp(shade, 0.6f, 1.25f);
         }
 
-        private bool IsContour(float[] heights, int width, int px, int py)
+        /// <summary>
+        /// 이 픽셀과 주변 픽셀이 다른 높이 구간에 속하면 등고선으로 본다.
+        /// thickness가 1이면 양옆 1픽셀까지 검사해서 선이 두꺼워진다.
+        /// </summary>
+        private static bool IsContour(float[] heights, int width, int height, int px, int py, float interval, int thickness)
         {
-            if (px == 0 || py == 0)
+            if (interval <= 0f)
             {
                 return false;
             }
 
-            int band = Mathf.FloorToInt(heights[py * width + px] / _contourInterval);
-            int leftBand = Mathf.FloorToInt(heights[py * width + px - 1] / _contourInterval);
-            int downBand = Mathf.FloorToInt(heights[(py - 1) * width + px] / _contourInterval);
-            return band != leftBand || band != downBand;
+            int band = Mathf.FloorToInt(heights[py * width + px] / interval);
+            for (int oy = -1 - thickness; oy <= thickness; oy++)
+            {
+                for (int ox = -1 - thickness; ox <= thickness; ox++)
+                {
+                    int nx = px + ox;
+                    int ny = py + oy;
+                    if ((ox == 0 && oy == 0) || nx < 0 || ny < 0 || nx >= width || ny >= height)
+                    {
+                        continue;
+                    }
+
+                    if (Mathf.FloorToInt(heights[ny * width + nx] / interval) != band)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private void CreateMapQuad(MapData map)

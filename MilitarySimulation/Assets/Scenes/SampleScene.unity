@@ -288,6 +288,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MilitarySimulation.DebugView::MilitarySimulation.DebugView.SimulationController
   _seed: 12345
+  _speedSteps:
+  - 2
+  - 5
+  - 10
+  - 20
+  _startSpeedIndex: 1
 --- !u!114 &336449116
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -306,6 +312,7 @@ MonoBehaviour:
   _selectedColor: {r: 1, g: 0.9, b: 0.2, a: 1}
   _contactColor: {r: 0.95, g: 0.2, b: 0.2, a: 1}
   _truthColor: {r: 1, g: 0.3, b: 1, a: 1}
+  _fireColor: {r: 1, g: 0.6, b: 0.1, a: 1}
 --- !u!114 &336449117
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -320,11 +327,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: MilitarySimulation.DebugView::MilitarySimulation.DebugView.DebugMapView
   _pixelsPerCell: 4
   _contourInterval: 5
-  _openLowColor: {r: 0.62, g: 0.72, b: 0.45, a: 1}
-  _openHighColor: {r: 0.78, g: 0.7, b: 0.5, a: 1}
-  _forestColor: {r: 0.2, g: 0.4, b: 0.22, a: 1}
-  _roadColor: {r: 0.8, g: 0.74, b: 0.6, a: 1}
+  _indexContourInterval: 25
+  _openLowColor: {r: 0.42, g: 0.62, b: 0.34, a: 1}
+  _openMidColor: {r: 0.8, g: 0.76, b: 0.46, a: 1}
+  _openHighColor: {r: 0.74, g: 0.52, b: 0.34, a: 1}
+  _forestColor: {r: 0.16, g: 0.36, b: 0.18, a: 1}
+  _roadColor: {r: 0.85, g: 0.8, b: 0.66, a: 1}
   _contourColor: {r: 0.25, g: 0.2, b: 0.12, a: 1}
+  _hillShadeStrength: 2.5
 --- !u!4 &336449118
 Transform:
   m_ObjectHideFlags: 0
