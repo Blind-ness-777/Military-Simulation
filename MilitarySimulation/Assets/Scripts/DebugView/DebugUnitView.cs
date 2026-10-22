@@ -16,7 +16,8 @@ namespace MilitarySimulation.DebugView
         /// <summary>정점 색(투명도 포함)을 그대로 그리는 내장 셰이더.</summary>
         private const string VertexColorShaderName = "Sprites/Default";
         private const float MarkerHeight = 2f;
-        private const float WatchLineLength = 150f;
+        private const float WatchDirectionLineLength = 120f;
+        private const float WatchArcAlpha = 0.3f;
         private const int LostContactFadeSeconds = 300;
         private const int CircleSegments = 16;
 
@@ -124,7 +125,7 @@ namespace MilitarySimulation.DebugView
 
                 AddPlatoonMarker(platoon, color, true);
                 AddPath(platoon, color);
-                AddWatchArc(platoon, color);
+                AddWatchArc(platoon, color, simulation.Rules.MaxVisualRange);
                 AddFriendlyFireLine(simulation, platoon);
             }
         }
@@ -182,7 +183,7 @@ namespace MilitarySimulation.DebugView
 
                 AddPlatoonMarker(platoon, _truthColor, false);
                 AddPath(platoon, _truthColor);
-                AddWatchArc(platoon, _truthColor);
+                AddWatchArc(platoon, _truthColor, simulation.Rules.MaxVisualRange);
                 AddTruthFireLine(simulation, platoon);
             }
         }
@@ -246,31 +247,40 @@ namespace MilitarySimulation.DebugView
             }
         }
 
-        private void AddWatchArc(Platoon platoon, Color color)
+        /// <summary>
+        /// 경계 부채꼴. 실제 탐지 거리(visualRange)까지 옅게 그린다.
+        /// 부채꼴은 "이 거리까지 본다"가 아니라 "이 방향의 발견 확률이 높다"는 뜻이라서,
+        /// 짧게 그리면 그 밖은 안전하다고 오해하게 된다.
+        /// </summary>
+        private void AddWatchArc(Platoon platoon, Color color, float visualRange)
         {
             if (!platoon.IsWatching)
             {
                 return;
             }
 
-            Color arcColor = WithAlpha(color, 0.6f);
+            Color arcColor = WithAlpha(color, WatchArcAlpha);
             Vector3 origin = WorldMapping.ToWorld(platoon.Position, MarkerHeight);
             float half = platoon.WatchArcDegrees * 0.5f;
             float startBearing = platoon.WatchBearingDegrees - half;
 
-            Vector3 previous = origin + WorldMapping.BearingToWorldDirection(startBearing) * WatchLineLength;
+            Vector3 previous = origin + WorldMapping.BearingToWorldDirection(startBearing) * visualRange;
             AddLine(origin, previous, arcColor);
 
-            const int segments = 12;
+            const int segments = 24;
             for (int i = 1; i <= segments; i++)
             {
                 float bearing = startBearing + platoon.WatchArcDegrees * i / segments;
-                Vector3 next = origin + WorldMapping.BearingToWorldDirection(bearing) * WatchLineLength;
+                Vector3 next = origin + WorldMapping.BearingToWorldDirection(bearing) * visualRange;
                 AddLine(previous, next, arcColor);
                 previous = next;
             }
 
             AddLine(origin, previous, arcColor);
+
+            // 경계 방향 중심선은 조금 진하게 짧게 그려서 방향을 알아보기 쉽게 한다.
+            Vector3 center = WorldMapping.BearingToWorldDirection(platoon.WatchBearingDegrees);
+            AddLine(origin, origin + center * WatchDirectionLineLength, WithAlpha(color, 0.8f));
         }
 
         private void AddLine(Vector3 from, Vector3 to, Color color)
@@ -422,12 +432,13 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"선택: {(selected != null ? $"{selected.Name} (사격 방침: {DisplayNames.Of(selected.FirePolicy)})" : "-")}");
             _textBuilder.AppendLine($"다음 이동 명령: {DisplayNames.Of(_controller.OrderMoveMode)}, 접촉 시 {DisplayNames.Of(_controller.OrderContactBehavior)}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
+            _textBuilder.AppendLine(GetCursorText(simulation));
             _textBuilder.AppendLine();
             _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 소대 선택");
             _textBuilder.AppendLine("우클릭 이동 (Shift 경로 추가) · M 이동 방식 · C 접촉 시 행동");
             _textBuilder.AppendLine("W 마우스 방향 경계 · H 정지 · F 사격 방침 · T 실제 전황");
 
-            GUI.Box(new Rect(10f, 10f, 430f, 160f), _textBuilder.ToString(), _panelStyle);
+            GUI.Box(new Rect(10f, 10f, 430f, 178f), _textBuilder.ToString(), _panelStyle);
         }
 
         private void DrawLogPanel(Simulation simulation)
@@ -490,6 +501,32 @@ namespace MilitarySimulation.DebugView
             }
 
             return $"({state})";
+        }
+
+        /// <summary>커서 아래 지점의 격자·고도·지형. 지형이 왜 시야를 막는지 확인하는 용도.</summary>
+        private string GetCursorText(Simulation simulation)
+        {
+            if (!_controller.HasCursorMapPosition)
+            {
+                return "커서: -";
+            }
+
+            Vec2 cursor = _controller.CursorMapPosition;
+            MapData map = simulation.Map;
+            return $"커서: {map.GetGridReference(cursor)}  고도 {map.GetHeightAt(cursor):0}m  {GetTerrainText(map.GetTerrainAt(cursor))}";
+        }
+
+        private static string GetTerrainText(TerrainType terrain)
+        {
+            switch (terrain)
+            {
+                case TerrainType.Forest:
+                    return "숲";
+                case TerrainType.Road:
+                    return "도로";
+                default:
+                    return "개활지";
+            }
         }
 
         private static string GetCombatText(Platoon platoon)
