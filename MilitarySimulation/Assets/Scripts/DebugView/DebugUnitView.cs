@@ -26,6 +26,7 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _selectedColor = new Color(1f, 0.9f, 0.2f);
         [SerializeField] private Color _contactColor = new Color(0.95f, 0.2f, 0.2f);
         [SerializeField] private Color _truthColor = new Color(1f, 0.3f, 1f);
+        [SerializeField] private Color _fireColor = new Color(1f, 0.6f, 0.1f);
 
         private readonly List<string> _logBuffer = new List<string>();
         private readonly StringBuilder _textBuilder = new StringBuilder();
@@ -116,10 +117,36 @@ namespace MilitarySimulation.DebugView
                 }
 
                 Color color = platoon == selected ? _selectedColor : _friendlyColor;
+                if (platoon.IsDestroyed)
+                {
+                    color = WithAlpha(color, 0.3f);
+                }
+
                 AddPlatoonMarker(platoon, color, true);
                 AddPath(platoon, color);
                 AddWatchArc(platoon, color);
+                AddFriendlyFireLine(simulation, platoon);
             }
+        }
+
+        /// <summary>아군 사격선은 진영 정보의 접촉 위치로 그린다(플레이어가 아는 표적 위치).</summary>
+        private void AddFriendlyFireLine(Simulation simulation, Platoon shooter)
+        {
+            if (!shooter.IsFiring)
+            {
+                return;
+            }
+
+            SideIntel intel = simulation.GetIntel(shooter.Side);
+            if (!intel.TryGetContact(shooter.CurrentTargetId, out Contact contact))
+            {
+                return;
+            }
+
+            AddLine(
+                WorldMapping.ToWorld(shooter.Position, MarkerHeight),
+                WorldMapping.ToWorld(contact.LastKnownPosition, MarkerHeight),
+                _fireColor);
         }
 
         private void AddContacts(Simulation simulation)
@@ -156,6 +183,30 @@ namespace MilitarySimulation.DebugView
                 AddPlatoonMarker(platoon, _truthColor, false);
                 AddPath(platoon, _truthColor);
                 AddWatchArc(platoon, _truthColor);
+                AddTruthFireLine(simulation, platoon);
+            }
+        }
+
+        /// <summary>적의 사격선은 실제 표적 위치로 그린다. ShowTruth 전용.</summary>
+        private void AddTruthFireLine(Simulation simulation, Platoon shooter)
+        {
+            if (!shooter.IsFiring)
+            {
+                return;
+            }
+
+            foreach (Platoon target in simulation.Platoons)
+            {
+                if (target.Id != shooter.CurrentTargetId)
+                {
+                    continue;
+                }
+
+                AddLine(
+                    WorldMapping.ToWorld(shooter.Position, MarkerHeight),
+                    WorldMapping.ToWorld(target.Position, MarkerHeight),
+                    WithAlpha(_truthColor, 0.8f));
+                return;
             }
         }
 
@@ -331,7 +382,9 @@ namespace MilitarySimulation.DebugView
                     continue;
                 }
 
-                string label = isFriendly ? $"{platoon.Name} {GetStateText(platoon)}" : $"[진실] {platoon.Name}";
+                string label = isFriendly
+                    ? $"{platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}"
+                    : $"[진실] {platoon.Name} {GetCombatText(platoon)}";
                 DrawWorldLabel(platoon.Position, label);
             }
 
@@ -357,7 +410,7 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 260f, 22f);
+            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 300f, 40f);
             GUI.Label(rect, text, _labelStyle);
         }
 
@@ -366,14 +419,15 @@ namespace MilitarySimulation.DebugView
             Platoon selected = _controller.SelectedPlatoon;
             _textBuilder.Clear();
             _textBuilder.AppendLine($"{simulation.FormatClock(simulation.ElapsedSeconds)}   x{_controller.Speed:0}   {(_controller.IsPaused ? "■ 일시정지" : "▶ 진행")}");
-            _textBuilder.AppendLine($"선택: {(selected != null ? selected.Name : "-")}   명령 이동 방식: {GetMoveModeText(_controller.OrderMoveMode)}");
+            _textBuilder.AppendLine($"선택: {(selected != null ? $"{selected.Name} (사격 방침: {DisplayNames.Of(selected.FirePolicy)})" : "-")}");
+            _textBuilder.AppendLine($"다음 이동 명령: {DisplayNames.Of(_controller.OrderMoveMode)}, 접촉 시 {DisplayNames.Of(_controller.OrderContactBehavior)}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine();
             _textBuilder.AppendLine("Space 일시정지 · 1/2/3 배속 · Tab 소대 선택");
-            _textBuilder.AppendLine("우클릭 이동 (Shift 경로 추가) · M 이동 방식");
-            _textBuilder.AppendLine("W 마우스 방향 경계 · H 정지 · T 실제 전황");
+            _textBuilder.AppendLine("우클릭 이동 (Shift 경로 추가) · M 이동 방식 · C 접촉 시 행동");
+            _textBuilder.AppendLine("W 마우스 방향 경계 · H 정지 · F 사격 방침 · T 실제 전황");
 
-            GUI.Box(new Rect(10f, 10f, 380f, 140f), _textBuilder.ToString(), _panelStyle);
+            GUI.Box(new Rect(10f, 10f, 430f, 160f), _textBuilder.ToString(), _panelStyle);
         }
 
         private void DrawLogPanel(Simulation simulation)
@@ -405,25 +459,42 @@ namespace MilitarySimulation.DebugView
 
         private static string GetStateText(Platoon platoon)
         {
+            if (platoon.IsDestroyed)
+            {
+                return "(전투 불능)";
+            }
+
+            if (platoon.IsBroken)
+            {
+                return "(사기 붕괴)";
+            }
+
+            string state;
             if (platoon.IsMoving)
             {
-                return $"({GetMoveModeText(platoon.CurrentMoveMode)} 이동)";
+                state = $"{DisplayNames.Of(platoon.CurrentMoveMode)} 이동";
+            }
+            else
+            {
+                state = platoon.IsWatching ? $"경계 {platoon.WatchBearingDegrees:000}" : "정지";
             }
 
-            return platoon.IsWatching ? $"(경계 {platoon.WatchBearingDegrees:000})" : "(정지)";
+            if (platoon.IsPinned)
+            {
+                state += ", 제압됨";
+            }
+
+            if (platoon.IsFiring)
+            {
+                state += ", 사격 중";
+            }
+
+            return $"({state})";
         }
 
-        private static string GetMoveModeText(MoveMode moveMode)
+        private static string GetCombatText(Platoon platoon)
         {
-            switch (moveMode)
-            {
-                case MoveMode.Fast:
-                    return "신속";
-                case MoveMode.Stealth:
-                    return "은밀";
-                default:
-                    return "일반";
-            }
+            return $"{platoon.Effective}/{platoon.InitialStrength}명 사기 {platoon.Morale:0} 제압 {platoon.Suppression:0}";
         }
     }
 }
