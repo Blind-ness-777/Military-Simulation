@@ -31,6 +31,21 @@ namespace MilitarySimulation.Engine
             }
         }
 
+        public static string Of(CommsState commsState)
+        {
+            switch (commsState)
+            {
+                case CommsState.Direct:
+                    return "직접";
+                case CommsState.Degraded:
+                    return "저하";
+                case CommsState.Cut:
+                    return "두절";
+                default:
+                    return "정상";
+            }
+        }
+
         public static string Of(FirePolicy firePolicy)
         {
             switch (firePolicy)

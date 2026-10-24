@@ -57,5 +57,37 @@ namespace MilitarySimulation.Engine
 
             return true;
         }
+
+        /// <summary>
+        /// 두 지점을 잇는 직선 위로 지면이 가장 많이 솟은 높이(m). 0 이하면 지형에 막히지 않는다.
+        /// 무전 음영 판정용이라 숲은 무시한다(전파는 숲을 대부분 통과한다고 본다).
+        /// </summary>
+        public static float GetMaxTerrainObstruction(MapData map, Vec2 from, float fromHeight, Vec2 to, float toHeight)
+        {
+            float distance = Vec2.Distance(from, to);
+            float step = map.CellSize * 0.5f;
+            if (distance <= step)
+            {
+                return 0f;
+            }
+
+            float startHeight = map.GetHeightAt(from) + fromHeight;
+            float endHeight = map.GetHeightAt(to) + toHeight;
+            int sampleCount = (int)(distance / step);
+            float maxObstruction = 0f;
+
+            for (int i = 1; i < sampleCount; i++)
+            {
+                float t = i * step / distance;
+                float lineHeight = startHeight + (endHeight - startHeight) * t;
+                float obstruction = map.GetHeightAt(Vec2.Lerp(from, to, t)) - lineHeight;
+                if (obstruction > maxObstruction)
+                {
+                    maxObstruction = obstruction;
+                }
+            }
+
+            return maxObstruction;
+        }
     }
 }

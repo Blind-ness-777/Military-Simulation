@@ -7,6 +7,7 @@ namespace MilitarySimulation.Engine
     /// - 중앙(동서 방향)에 높이 25m 능선. 북쪽 사면 뒤에 적 1소대가 있어 역사면(P5)을 확인할 수 있다.
     /// - 남서쪽 숲: 아군이 엄폐하며 접근할 수 있는 곳.
     /// - 동쪽 언덕과 남북 도로. 적 2소대가 도로를 따라 남하한다.
+    /// - 블루는 본부 분대가 있어 명령이 통신을 거친다. 능선 너머는 무전 음영, 동쪽 숲 일대는 재밍 구역.
     /// 시나리오 데이터 파일 형식을 정하기 전까지 코드로 만든다.
     /// </summary>
     public static class TestScenario
@@ -14,6 +15,7 @@ namespace MilitarySimulation.Engine
         private const int MapCells = 100;
         private const float CellSize = 10f;
         private const int StartTimeOfDay = 7 * 3600;
+        private const int HeadquartersStrength = 6;
 
         public static Simulation Create(int seed)
         {
@@ -22,6 +24,14 @@ namespace MilitarySimulation.Engine
 
             simulation.AddPlatoon("1소대", Side.Blue, new Vec2(250f, 80f), 0f);
             simulation.AddPlatoon("2소대", Side.Blue, new Vec2(420f, 80f), 0f);
+
+            // 본부 분대: 현재 기준 장비(본부만 위성통신). 소대까지 위성통신을 주는 건 근미래 스테이지에서.
+            Platoon headquarters = simulation.AddPlatoon(
+                "본부", Side.Blue, new Vec2(335f, 40f), 0f, HeadquartersStrength, PlatoonRole.Headquarters);
+            headquarters.CommsEquipment = CommsEquipment.LineOfSightRadio | CommsEquipment.Satcom;
+
+            // 동쪽 숲 일대에 약한 재밍(적이 건 것). 들어가면 블루 통신이 저하된다.
+            simulation.AddJammingZone(new JammingZone(new Vec2(680f, 420f), 150f, JammingStrength.Degrade, Side.Blue));
 
             Platoon redFirst = simulation.AddPlatoon("적 1소대", Side.Red, new Vec2(450f, 610f), 180f);
             simulation.OrderWatch(redFirst, 180f, 120f);
