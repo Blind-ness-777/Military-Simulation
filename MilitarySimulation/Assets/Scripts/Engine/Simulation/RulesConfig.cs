@@ -103,5 +103,46 @@ namespace MilitarySimulation.Engine
 
         /// <summary>마지막 피격 후 이 시간(초) 동안은 접촉 상태로 본다.</summary>
         public int ContactMemorySeconds = 5;
+
+        // 통신 (현대·근미래 기준: 평시는 지연이 거의 없고, 환경·재밍·손실로만 저하·두절)
+        /// <summary>본부와 이 거리(m) 안이면 목소리·수신호로 지휘한다(무전 불필요).</summary>
+        public float VoiceRange = 50f;
+
+        public float RadioRange = 5000f;
+        public float HeadquartersAntennaHeight = 3f;
+        public float UnitAntennaHeight = 2f;
+
+        /// <summary>가시선 무전 직선 위로 지형이 이 높이(m)를 넘게 솟으면 두절, 그 이하로 걸리면 저하.</summary>
+        public float RadioShadowCutDepth = 15f;
+
+        /// <summary>위성통신의 하늘 시야 판정: 주변 지형이 이 각도(도)보다 높게 솟아 있으면 막힌 것으로 본다.</summary>
+        public float SatcomMaskAngleDegrees = 30f;
+
+        /// <summary>하늘 시야를 검사하는 주변 반경(m).</summary>
+        public float SatcomSkyCheckRadius = 150f;
+
+        /// <summary>통신 상태 판정 주기(초). 매 틱 계산할 필요는 없다.</summary>
+        public int CommsCheckIntervalSeconds = 5;
+
+        // 명령 전달 지연(초)
+        public int DirectCommandDelaySeconds = 1;
+        public int NormalCommandDelaySeconds = 2;
+        public int DegradedCommandDelaySeconds = 15;
+
+        /// <summary>통신병 1명이 본부 사상자 중에 포함될 확률을 정하는 통신병 수.</summary>
+        public int HeadquartersRadioOperators = 1;
+
+        // 자체 판단 모드 (연락 두절 부대)
+        /// <summary>두절이 이 시간(초) 넘게 이어지고 마지막 웨이포인트에 도착하면 자체 판단 모드로 전환한다.</summary>
+        public int SelfDirectedDelaySeconds = 120;
+
+        public float SelfDirectedRetreatStrength = 0.5f;
+        public float SelfDirectedWithdrawStrength = 0.3f;
+
+        /// <summary>자체 판단 후퇴 때 지나온 길을 되짚는 거리(m).</summary>
+        public float SelfDirectedRetreatDistance = 200f;
+
+        /// <summary>지나온 경로를 기록하는 간격(m).</summary>
+        public float TrailSpacing = 25f;
     }
 }

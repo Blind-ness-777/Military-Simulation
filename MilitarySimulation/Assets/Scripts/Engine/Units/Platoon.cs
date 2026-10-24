@@ -9,8 +9,10 @@ namespace MilitarySimulation.Engine
     public class Platoon
     {
         private readonly List<Waypoint> _waypoints = new List<Waypoint>();
+        private readonly List<Vec2> _trail = new List<Vec2>();
 
-        internal Platoon(int id, string name, Side side, Vec2 position, float facingDegrees, int strength, float morale)
+        internal Platoon(
+            int id, string name, Side side, Vec2 position, float facingDegrees, int strength, float morale, PlatoonRole role)
         {
             Id = id;
             Name = name;
@@ -21,11 +23,15 @@ namespace MilitarySimulation.Engine
             InitialStrength = strength;
             Effective = strength;
             Morale = morale;
+            Role = role;
+            _trail.Add(position);
         }
 
         public int Id { get; }
         public string Name { get; }
         public Side Side { get; }
+        public PlatoonRole Role { get; }
+        public bool IsHeadquarters => Role == PlatoonRole.Headquarters;
         public Vec2 Position { get; internal set; }
 
         /// <summary>마지막으로 향한 방향(방위각). 정지해도 유지된다.</summary>
@@ -78,6 +84,52 @@ namespace MilitarySimulation.Engine
 
         /// <summary>직전 틱에 접촉 상태였는지. 접촉 시 행동은 접촉이 "시작될 때" 한 번만 발동한다.</summary>
         internal bool WasInContact { get; set; }
+
+        /// <summary>
+        /// 가진 통신 수단. 기본은 가시선 무전기. 본부가 통신병을 잃으면 None이 된다
+        /// (통신 장비를 통신병이 운용한다고 본다).
+        /// </summary>
+        public CommsEquipment CommsEquipment { get; internal set; } = CommsEquipment.LineOfSightRadio;
+
+        /// <summary>본부와의 통신 상태. 본부가 없는 진영은 항상 Normal.</summary>
+        public CommsState Comms { get; internal set; } = CommsState.Normal;
+
+        /// <summary>통신이 두절된 시각(경과 초). 두절 상태가 아니면 의미가 없다.</summary>
+        internal int CommsCutSinceSeconds { get; set; }
+
+        /// <summary>연락 두절이 길어져 스스로 단순 판단(고수·후퇴·철수)으로 움직이는 중인지.</summary>
+        public bool IsSelfDirected { get; internal set; }
+
+        /// <summary>자체 판단 모드의 진행 단계. 0 고수, 1 후퇴함, 2 철수 중.</summary>
+        internal int SelfDirectedStage { get; set; }
+
+        /// <summary>지나온 경로(일정 간격으로 기록). 자체 판단 모드의 후퇴·철수가 이 길을 되짚는다.</summary>
+        public IReadOnlyList<Vec2> Trail => _trail;
+
+        internal void RecordTrail(float spacing)
+        {
+            if (Vec2.Distance(_trail[_trail.Count - 1], Position) >= spacing)
+            {
+                _trail.Add(Position);
+            }
+        }
+
+        /// <summary>
+        /// 되짚어 간 구간을 경로 기록에서 잘라낸다. 앞쪽 keepCount개만 남기고 endPoint를 마지막에 붙인다.
+        /// 이렇게 해야 다음에 되짚을 때 방금 물러난 길을 따라 다시 앞으로 가지 않는다.
+        /// </summary>
+        internal void TruncateTrail(int keepCount, Vec2 endPoint)
+        {
+            if (keepCount < _trail.Count)
+            {
+                _trail.RemoveRange(keepCount, _trail.Count - keepCount);
+            }
+
+            if (_trail.Count == 0 || Vec2.Distance(_trail[_trail.Count - 1], endPoint) > 0.01f)
+            {
+                _trail.Add(endPoint);
+            }
+        }
 
         /// <summary>경계 중이고, 주어진 방위가 경계 부채꼴 안에 있는지.</summary>
         public bool IsInWatchArc(float bearingDegrees)

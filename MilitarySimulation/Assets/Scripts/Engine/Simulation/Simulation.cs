@@ -5,10 +5,11 @@ namespace MilitarySimulation.Engine
 {
     /// <summary>
     /// 시뮬레이션 본체. 실제 상태(진실)를 갖고, 고정 1초 틱으로 진행한다.
-    /// 틱 순서: 이동 → 탐지(진영 원장 갱신) → 교전(동시 사격) → 제압·사기 → 접촉 시 행동 → 인원 검산.
-    /// 명령 지연과 본부 분대는 다음 단계에서 이 순서에 끼워 넣는다.
+    /// 틱 순서: 통신 판정 → 명령 도착 → 이동 → 탐지(진영 원장 갱신) → 교전(동시 사격) → 제압·사기
+    ///          → 접촉 시 행동 → 자체 판단 모드 → 인원 검산.
+    /// 명령·통신·자체 판단은 Simulation.Command.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
-    public class Simulation
+    public partial class Simulation
     {
         /// <summary>틱 길이(게임 시간 초). 기획서 결정 사항으로 1초 고정.</summary>
         public const int TickSeconds = 1;
@@ -44,12 +45,22 @@ namespace MilitarySimulation.Engine
         public IReadOnlyList<Platoon> Platoons => _platoons;
         public IReadOnlyList<SimEvent> Events => _events;
 
-        public Platoon AddPlatoon(string name, Side side, Vec2 position, float facingDegrees, int strength = 30)
+        public Platoon AddPlatoon(
+            string name,
+            Side side,
+            Vec2 position,
+            float facingDegrees,
+            int strength = 30,
+            PlatoonRole role = PlatoonRole.Line)
         {
             if (strength <= 0) throw new ArgumentOutOfRangeException(nameof(strength));
+            if (role == PlatoonRole.Headquarters && TryGetHeadquarters(side, out _))
+            {
+                throw new InvalidOperationException($"{side} 진영에는 이미 본부가 있습니다.");
+            }
 
             var platoon = new Platoon(
-                _nextPlatoonId++, name, side, Map.ClampInside(position), facingDegrees, strength, Rules.InitialMorale);
+                _nextPlatoonId++, name, side, Map.ClampInside(position), facingDegrees, strength, Rules.InitialMorale, role);
             _platoons.Add(platoon);
             _platoonsById.Add(platoon.Id, platoon);
             return platoon;
@@ -67,72 +78,17 @@ namespace MilitarySimulation.Engine
             return $"{hours:00}:{minutes:00}:{seconds:00}";
         }
 
-        public void OrderMove(
-            Platoon platoon,
-            IReadOnlyList<Vec2> points,
-            MoveMode moveMode,
-            bool append,
-            ContactBehavior contactBehavior = ContactBehavior.TakeCover)
-        {
-            if (points == null || points.Count == 0 || !CanTakeOrders(platoon))
-            {
-                return;
-            }
-
-            var waypoints = new List<Waypoint>(points.Count);
-            foreach (Vec2 point in points)
-            {
-                waypoints.Add(new Waypoint(Map.ClampInside(point), moveMode, contactBehavior));
-            }
-
-            platoon.SetPath(waypoints, append);
-            Vec2 destination = waypoints[waypoints.Count - 1].Position;
-            string verb = append ? "경로 추가" : "이동";
-            Log(platoon.Side,
-                $"명령: {platoon.Name} {verb} → {Map.GetGridReference(destination)} ({DisplayNames.Of(moveMode)}, 접촉 시 {DisplayNames.Of(contactBehavior)})");
-        }
-
-        public void OrderWatch(Platoon platoon, float bearingDegrees, float arcDegrees)
-        {
-            if (!CanTakeOrders(platoon))
-            {
-                return;
-            }
-
-            platoon.SetWatch(bearingDegrees, arcDegrees);
-            Log(platoon.Side, $"명령: {platoon.Name} 경계 방위 {platoon.WatchBearingDegrees:000} (폭 {arcDegrees:0}도)");
-        }
-
-        public void OrderHold(Platoon platoon)
-        {
-            if (!CanTakeOrders(platoon))
-            {
-                return;
-            }
-
-            platoon.Hold();
-            Log(platoon.Side, $"명령: {platoon.Name} 정지");
-        }
-
-        public void OrderFirePolicy(Platoon platoon, FirePolicy firePolicy)
-        {
-            if (!CanTakeOrders(platoon))
-            {
-                return;
-            }
-
-            platoon.FirePolicy = firePolicy;
-            Log(platoon.Side, $"명령: {platoon.Name} 사격 방침 {DisplayNames.Of(firePolicy)}");
-        }
-
         public void Tick()
         {
             ElapsedSeconds += TickSeconds;
+            UpdateComms();
+            DeliverPendingOrders();
             UpdateMovement();
             UpdateDetection();
             UpdateCombat();
             UpdateSuppressionAndMorale();
             UpdateContactReactions();
+            UpdateSelfDirected();
             VerifyStrengthLedger();
         }
 
@@ -202,23 +158,6 @@ namespace MilitarySimulation.Engine
                 Rules.ForestCanopyHeight);
         }
 
-        private bool CanTakeOrders(Platoon platoon)
-        {
-            if (platoon.IsDestroyed)
-            {
-                Log(platoon.Side, $"명령 불가: {platoon.Name} 전멸");
-                return false;
-            }
-
-            if (platoon.IsBroken)
-            {
-                Log(platoon.Side, $"명령 불가: {platoon.Name} 사기 붕괴");
-                return false;
-            }
-
-            return true;
-        }
-
         private void UpdateMovement()
         {
             foreach (Platoon platoon in _platoons)
@@ -256,6 +195,13 @@ namespace MilitarySimulation.Engine
                         platoon.Position += toTarget.Normalized * remaining;
                         remaining = 0f;
                     }
+                }
+
+                // 자체 판단으로 지나온 길을 되짚는 동안은 기록하지 않는다(기록하면 다음 후퇴 때 앞으로 되돌아간다).
+                bool retracingTrail = platoon.IsSelfDirected && platoon.SelfDirectedStage > 0;
+                if (!retracingTrail)
+                {
+                    platoon.RecordTrail(Rules.TrailSpacing);
                 }
             }
         }
@@ -480,6 +426,11 @@ namespace MilitarySimulation.Engine
                 return 0;
             }
 
+            if (target.IsHeadquarters && target.CommsEquipment != CommsEquipment.None)
+            {
+                CheckRadioOperatorLoss(target, casualties);
+            }
+
             int killed = 0;
             for (int i = 0; i < casualties; i++)
             {
@@ -502,7 +453,9 @@ namespace MilitarySimulation.Engine
             {
                 target.Hold();
                 target.CurrentTargetId = 0;
-                Log(target.Side, $"{target.Name} 전투 불능");
+                RemovePendingOrders(target);
+                Log(target.Side,
+                    target.IsHeadquarters ? $"{target.Name} 전투 불능 — 지휘 상실" : $"{target.Name} 전투 불능");
             }
 
             return casualties;

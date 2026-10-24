@@ -34,6 +34,8 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _truthColor = new Color(1f, 0.3f, 1f);
         [SerializeField] private Color _fireColor = new Color(1f, 0.6f, 0.1f);
         [SerializeField] private Color _activeButtonColor = new Color(1f, 0.85f, 0.3f);
+        [SerializeField] private Color _pendingOrderColor = new Color(0.85f, 0.85f, 0.85f);
+        [SerializeField] private Color _jammingColor = new Color(0.75f, 0.35f, 1f);
 
         /// <summary>
         /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
@@ -76,7 +78,9 @@ namespace MilitarySimulation.DebugView
             _triangleIndices.Clear();
 
             Simulation simulation = _controller.Simulation;
+            AddJammingZones(simulation);
             AddFriendlyPlatoons(simulation);
+            AddPendingMoveOrders(simulation);
             AddContacts(simulation);
             if (_controller.ShowTruth)
             {
@@ -155,9 +159,61 @@ namespace MilitarySimulation.DebugView
                 }
 
                 AddPlatoonMarker(platoon, color, true);
+                if (platoon.IsHeadquarters)
+                {
+                    // 본부는 원 바깥에 사각 테두리를 둘러 구분한다.
+                    AddSquareOutline(WorldMapping.ToWorld(platoon.Position, MarkerHeight), _markerSize * 0.85f, color);
+                }
+
                 AddPath(platoon, color);
                 AddWatchArc(platoon, color, simulation.Rules.MaxVisualRange);
                 AddFriendlyFireLine(simulation, platoon);
+            }
+        }
+
+        /// <summary>
+        /// 발신했지만 아직 도착하지 않은 이동 명령을 점선으로 그린다.
+        /// 경로 추가 명령은 현재 경로의 끝에서 이어서 그린다.
+        /// </summary>
+        private void AddPendingMoveOrders(Simulation simulation)
+        {
+            foreach (PendingOrder order in simulation.PendingOrders)
+            {
+                if (order.Kind != OrderKind.Move || order.Platoon.Side != _controller.PlayerSide)
+                {
+                    continue;
+                }
+
+                Platoon platoon = order.Platoon;
+                Vec2 start = platoon.Position;
+                if (order.Append && platoon.IsMoving)
+                {
+                    start = platoon.Waypoints[platoon.Waypoints.Count - 1].Position;
+                }
+
+                Color color = WithAlpha(_pendingOrderColor, order.IsWaitingForComms ? 0.4f : 0.8f);
+                Vec2 previous = start;
+                foreach (Waypoint waypoint in order.Waypoints)
+                {
+                    AddDashedLine(previous, waypoint.Position, color);
+                    AddSquareOutline(WorldMapping.ToWorld(waypoint.Position, MarkerHeight), 3f, color);
+                    previous = waypoint.Position;
+                }
+            }
+        }
+
+        private void AddJammingZones(Simulation simulation)
+        {
+            foreach (JammingZone zone in simulation.JammingZones)
+            {
+                // 플레이어가 받는 재밍만 보여준다. 적이 받는 재밍은 실제 전황 표시에서만.
+                if (zone.AffectedSide != _controller.PlayerSide && !_controller.ShowTruth)
+                {
+                    continue;
+                }
+
+                float alpha = zone.Strength == JammingStrength.Block ? 0.7f : 0.4f;
+                AddCircleOutline(WorldMapping.ToWorld(zone.Center, MarkerHeight * 0.5f), zone.Radius, WithAlpha(_jammingColor, alpha), 48);
             }
         }
 
@@ -253,7 +309,7 @@ namespace MilitarySimulation.DebugView
             }
             else
             {
-                AddCircleOutline(center, radius, color);
+                AddCircleOutline(center, radius, color, CircleSegments);
             }
 
             Vector3 facing = WorldMapping.BearingToWorldDirection(platoon.FacingDegrees);
@@ -352,11 +408,29 @@ namespace MilitarySimulation.DebugView
             }
         }
 
-        private void AddCircleOutline(Vector3 center, float radius, Color color)
+        private void AddCircleOutline(Vector3 center, float radius, Color color, int segments)
         {
-            for (int i = 0; i < CircleSegments; i++)
+            for (int i = 0; i < segments; i++)
             {
-                AddLine(center + GetCircleOffset(i, radius), center + GetCircleOffset(i + 1, radius), color);
+                AddLine(
+                    center + GetCircleOffset(i, radius, segments),
+                    center + GetCircleOffset(i + 1, radius, segments),
+                    color);
+            }
+        }
+
+        private void AddDashedLine(Vec2 from, Vec2 to, Color color)
+        {
+            const float dash = 10f;
+            const float gap = 7f;
+            float length = Vec2.Distance(from, to);
+            for (float start = 0f; start < length; start += dash + gap)
+            {
+                float end = Mathf.Min(start + dash, length);
+                AddLine(
+                    WorldMapping.ToWorld(Vec2.Lerp(from, to, start / length), MarkerHeight),
+                    WorldMapping.ToWorld(Vec2.Lerp(from, to, end / length), MarkerHeight),
+                    color);
             }
         }
 
@@ -393,9 +467,9 @@ namespace MilitarySimulation.DebugView
             return _vertices.Count - 1;
         }
 
-        private static Vector3 GetCircleOffset(int index, float radius)
+        private static Vector3 GetCircleOffset(int index, float radius, int segments = CircleSegments)
         {
-            float angle = index * Mathf.PI * 2f / CircleSegments;
+            float angle = index * Mathf.PI * 2f / segments;
             return new Vector3(Mathf.Sin(angle) * radius, 0f, Mathf.Cos(angle) * radius);
         }
 
@@ -442,7 +516,7 @@ namespace MilitarySimulation.DebugView
             GUILayout.EndHorizontal();
 
             Platoon selected = _controller.SelectedPlatoon;
-            bool canCommand = selected != null && !selected.IsDestroyed && !selected.IsBroken;
+            bool canCommand = !_controller.IsSpectating && selected != null && !selected.IsDestroyed && !selected.IsBroken;
             GUI.enabled = canCommand;
 
             GUILayout.BeginHorizontal();
@@ -533,6 +607,11 @@ namespace MilitarySimulation.DebugView
 
         private string GetCommandHint(Platoon selected)
         {
+            if (_controller.IsSpectating)
+            {
+                return "본부 전멸 — 관전 모드. 남은 소대는 마지막 명령과 자체 판단으로 움직임";
+            }
+
             if (selected == null)
             {
                 return "선택된 소대 없음";
@@ -548,7 +627,47 @@ namespace MilitarySimulation.DebugView
                 return "지도를 좌클릭해 경계 방향 지정 (우클릭·Esc 취소)";
             }
 
-            return "이동 방식·접촉 시는 다음 이동 명령에, 사격 방침은 즉시 적용";
+            if (selected.Comms == CommsState.Cut)
+            {
+                return $"{selected.Name}: 통신 두절 — 명령은 회복될 때까지 보류됨";
+            }
+
+            return "이동 방식·접촉 시는 다음 이동 명령에, 사격 방침은 바로 발신";
+        }
+
+        /// <summary>통신 상태와 도착 대기 중인 명령. 본부는 통신 상태 대신 "본부"로 표시한다.</summary>
+        private string GetCommandText(Simulation simulation, Platoon platoon)
+        {
+            if (platoon.IsHeadquarters)
+            {
+                return "본부";
+            }
+
+            if (!simulation.TryGetHeadquarters(platoon.Side, out _))
+            {
+                return string.Empty;
+            }
+
+            string text = $"통신 {DisplayNames.Of(platoon.Comms)}";
+            if (platoon.IsSelfDirected)
+            {
+                text += " · 자체 판단";
+            }
+
+            foreach (PendingOrder order in simulation.PendingOrders)
+            {
+                if (order.Platoon != platoon)
+                {
+                    continue;
+                }
+
+                text += order.IsWaitingForComms
+                    ? " · 명령 대기(통신 회복 시)"
+                    : $" · 명령 도착 {order.DeliverAtSeconds - simulation.ElapsedSeconds}초 후";
+                break;
+            }
+
+            return text;
         }
 
         private void EnsureStyles()
@@ -575,7 +694,7 @@ namespace MilitarySimulation.DebugView
                 }
 
                 string label = isFriendly
-                    ? $"{platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}"
+                    ? $"{platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}\n{GetCommandText(simulation, platoon)}"
                     : $"[진실] {platoon.Name} {GetCombatText(platoon)}";
                 DrawWorldLabel(platoon.Position, label);
             }
@@ -602,7 +721,7 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 300f, 40f);
+            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 340f, 60f);
             GUI.Label(rect, text, _labelStyle);
         }
 
@@ -611,6 +730,11 @@ namespace MilitarySimulation.DebugView
             Platoon selected = _controller.SelectedPlatoon;
             _textBuilder.Clear();
             _textBuilder.AppendLine($"{simulation.FormatClock(simulation.ElapsedSeconds)}   x{_controller.Speed:0}   {(_controller.IsPaused ? "■ 일시정지" : "▶ 진행")}");
+            if (_controller.IsSpectating)
+            {
+                _textBuilder.AppendLine("본부 전멸 — 관전 모드 (명령 불가)");
+            }
+
             _textBuilder.AppendLine($"선택: {(selected != null ? selected.Name : "-")}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine(GetCursorText(simulation));
@@ -619,7 +743,7 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 다음 소대");
             _textBuilder.AppendLine("H 정지 · T 실제 전황 · Esc 취소");
 
-            var rect = new Rect(PanelMargin, PanelMargin, 430f, 160f);
+            var rect = new Rect(PanelMargin, PanelMargin, 430f, _controller.IsSpectating ? 178f : 160f);
             _uiRects.Add(rect);
             GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
         }
