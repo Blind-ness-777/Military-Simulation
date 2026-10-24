@@ -106,6 +106,12 @@ namespace MilitarySimulation.Engine
         /// <summary>지나온 경로(일정 간격으로 기록). 자체 판단 모드의 후퇴·철수가 이 길을 되짚는다.</summary>
         public IReadOnlyList<Vec2> Trail => _trail;
 
+        /// <summary>
+        /// 이 소대가 직접 본 적(실제 부대 Id → 소대 인지). 통신이 끊겨도 소대는 자기가 본 것으로 사격·후퇴한다.
+        /// 순회 순서에 의존하는 처리(로그 등)는 하지 않는다.
+        /// </summary>
+        internal Dictionary<int, LocalContact> KnownEnemies { get; } = new Dictionary<int, LocalContact>();
+
         internal void RecordTrail(float spacing)
         {
             if (Vec2.Distance(_trail[_trail.Count - 1], Position) >= spacing)

@@ -8,6 +8,7 @@ namespace MilitarySimulation.DebugView
     /// <summary>
     /// 부대·경로·경계 부채꼴·접촉을 동적 메시(선 + 채운 도형)로, 이름표·HUD·로그를 IMGUI로 그리는 디버그 표시.
     /// 기본은 플레이어 진영 정보만 보여주고(안개), ShowTruth일 때만 실제 적 위치를 함께 그린다.
+    /// 아군도 본부가 아는 만큼만 그린다. 보고가 끊긴 소대는 마지막 보고 위치에 흐리게 남는다.
     /// Gizmos 대신 메시를 쓰는 이유: Gizmos는 Game 뷰의 Gizmos 버튼 상태에 따라 보이지 않을 수 있다.
     /// 매 프레임 갱신은 SimulationController가 Refresh()를 호출해서 한다.
     /// 명령 패널(RTS 커맨드 카드 방식)도 여기서 그리고, 버튼 입력은 컨트롤러의 명령 메서드로 넘긴다.
@@ -25,6 +26,7 @@ namespace MilitarySimulation.DebugView
         private const float CommandPanelHeight = 190f;
         private const float PanelMargin = 10f;
         private const float RowLabelWidth = 96f;
+        private const float StaleReportAlpha = 0.45f;
 
         [SerializeField] private float _markerSize = 18f;
         [SerializeField] private int _logLineCount = 14;
@@ -153,22 +155,43 @@ namespace MilitarySimulation.DebugView
                 }
 
                 Color color = platoon == selected ? _selectedColor : _friendlyColor;
+                if (_controller.TryGetStaleReport(platoon, out FriendlyReport report))
+                {
+                    AddReportedPlatoon(report.Snapshot, color, simulation.Rules.MaxVisualRange);
+                    continue;
+                }
+
                 if (platoon.IsDestroyed)
                 {
                     color = WithAlpha(color, 0.3f);
                 }
 
-                AddPlatoonMarker(platoon, color, true);
+                AddPlatoonMarker(platoon.Position, platoon.FacingDegrees, color, true);
                 if (platoon.IsHeadquarters)
                 {
                     // 본부는 원 바깥에 사각 테두리를 둘러 구분한다.
                     AddSquareOutline(WorldMapping.ToWorld(platoon.Position, MarkerHeight), _markerSize * 0.85f, color);
                 }
 
-                AddPath(platoon, color);
-                AddWatchArc(platoon, color, simulation.Rules.MaxVisualRange);
+                AddPath(platoon.Position, platoon.Waypoints, color);
+                AddWatchArc(platoon.Position, platoon.IsWatching, platoon.WatchBearingDegrees, platoon.WatchArcDegrees,
+                    color, simulation.Rules.MaxVisualRange);
                 AddFriendlyFireLine(simulation, platoon);
             }
+        }
+
+        /// <summary>
+        /// 보고가 끊긴 아군: 마지막 보고 위치에 흐린 테두리 원, 그때 수행 중이던 경로(플레이어가 내린 명령)를 함께 그린다.
+        /// 추정 위치는 그리지 않는다.
+        /// </summary>
+        private void AddReportedPlatoon(PlatoonSnapshot snapshot, Color color, float visualRange)
+        {
+            Color ghost = WithAlpha(color, snapshot.IsDestroyed ? 0.2f : StaleReportAlpha);
+            AddPlatoonMarker(snapshot.Position, snapshot.FacingDegrees, ghost, false);
+            AddCircleOutline(WorldMapping.ToWorld(snapshot.Position, MarkerHeight), _markerSize * 0.3f, ghost, CircleSegments);
+            AddPath(snapshot.Position, snapshot.Waypoints, ghost);
+            AddWatchArc(snapshot.Position, snapshot.IsWatching, snapshot.WatchBearingDegrees, snapshot.WatchArcDegrees,
+                ghost, visualRange);
         }
 
         /// <summary>
@@ -184,11 +207,19 @@ namespace MilitarySimulation.DebugView
                     continue;
                 }
 
+                // 시작점도 플레이어가 아는 상태 기준(보고가 끊긴 소대는 마지막 보고의 위치·경로).
                 Platoon platoon = order.Platoon;
                 Vec2 start = platoon.Position;
-                if (order.Append && platoon.IsMoving)
+                IReadOnlyList<Waypoint> knownPath = platoon.Waypoints;
+                if (_controller.TryGetStaleReport(platoon, out FriendlyReport report))
                 {
-                    start = platoon.Waypoints[platoon.Waypoints.Count - 1].Position;
+                    start = report.Snapshot.Position;
+                    knownPath = report.Snapshot.Waypoints;
+                }
+
+                if (order.Append && knownPath.Count > 0)
+                {
+                    start = knownPath[knownPath.Count - 1].Position;
                 }
 
                 Color color = WithAlpha(_pendingOrderColor, order.IsWaitingForComms ? 0.4f : 0.8f);
@@ -217,7 +248,10 @@ namespace MilitarySimulation.DebugView
             }
         }
 
-        /// <summary>아군 사격선은 진영 정보의 접촉 위치로 그린다(플레이어가 아는 표적 위치).</summary>
+        /// <summary>
+        /// 아군 사격선은 진영 정보의 접촉 위치로 그린다(플레이어가 아는 표적 위치).
+        /// 보고가 끊긴 소대는 이 메서드까지 오지 않는다(AddFriendlyPlatoons).
+        /// </summary>
         private void AddFriendlyFireLine(Simulation simulation, Platoon shooter)
         {
             if (!shooter.IsFiring)
@@ -265,12 +299,20 @@ namespace MilitarySimulation.DebugView
             {
                 if (platoon.Side == _controller.PlayerSide)
                 {
+                    // 보고가 끊긴 아군은 실제 위치를 진실 색 테두리로만 보여준다.
+                    if (_controller.TryGetStaleReport(platoon, out _))
+                    {
+                        AddPlatoonMarker(platoon.Position, platoon.FacingDegrees, _truthColor, false);
+                        AddPath(platoon.Position, platoon.Waypoints, _truthColor);
+                    }
+
                     continue;
                 }
 
-                AddPlatoonMarker(platoon, _truthColor, false);
-                AddPath(platoon, _truthColor);
-                AddWatchArc(platoon, _truthColor, simulation.Rules.MaxVisualRange);
+                AddPlatoonMarker(platoon.Position, platoon.FacingDegrees, _truthColor, false);
+                AddPath(platoon.Position, platoon.Waypoints, _truthColor);
+                AddWatchArc(platoon.Position, platoon.IsWatching, platoon.WatchBearingDegrees, platoon.WatchArcDegrees,
+                    _truthColor, simulation.Rules.MaxVisualRange);
                 AddTruthFireLine(simulation, platoon);
             }
         }
@@ -298,9 +340,9 @@ namespace MilitarySimulation.DebugView
             }
         }
 
-        private void AddPlatoonMarker(Platoon platoon, Color color, bool filled)
+        private void AddPlatoonMarker(Vec2 position, float facingDegrees, Color color, bool filled)
         {
-            Vector3 center = WorldMapping.ToWorld(platoon.Position, MarkerHeight);
+            Vector3 center = WorldMapping.ToWorld(position, MarkerHeight);
             float radius = _markerSize * 0.5f;
 
             if (filled)
@@ -312,20 +354,20 @@ namespace MilitarySimulation.DebugView
                 AddCircleOutline(center, radius, color, CircleSegments);
             }
 
-            Vector3 facing = WorldMapping.BearingToWorldDirection(platoon.FacingDegrees);
+            Vector3 facing = WorldMapping.BearingToWorldDirection(facingDegrees);
             AddLine(center, center + facing * _markerSize * 1.5f, color);
         }
 
-        private void AddPath(Platoon platoon, Color color)
+        private void AddPath(Vec2 start, IReadOnlyList<Waypoint> waypoints, Color color)
         {
-            if (!platoon.IsMoving)
+            if (waypoints.Count == 0)
             {
                 return;
             }
 
-            Color pathColor = WithAlpha(color, 0.8f);
-            Vector3 previous = WorldMapping.ToWorld(platoon.Position, MarkerHeight);
-            foreach (Waypoint waypoint in platoon.Waypoints)
+            Color pathColor = WithAlpha(color, color.a * 0.8f);
+            Vector3 previous = WorldMapping.ToWorld(start, MarkerHeight);
+            foreach (Waypoint waypoint in waypoints)
             {
                 Vector3 next = WorldMapping.ToWorld(waypoint.Position, MarkerHeight);
                 AddLine(previous, next, pathColor);
@@ -339,17 +381,18 @@ namespace MilitarySimulation.DebugView
         /// 부채꼴은 "이 거리까지 본다"가 아니라 "이 방향의 발견 확률이 높다"는 뜻이라서,
         /// 짧게 그리면 그 밖은 안전하다고 오해하게 된다.
         /// </summary>
-        private void AddWatchArc(Platoon platoon, Color color, float visualRange)
+        private void AddWatchArc(
+            Vec2 position, bool isWatching, float watchBearingDegrees, float watchArcDegrees, Color color, float visualRange)
         {
-            if (!platoon.IsWatching)
+            if (!isWatching)
             {
                 return;
             }
 
-            Color arcColor = WithAlpha(color, WatchArcAlpha);
-            Vector3 origin = WorldMapping.ToWorld(platoon.Position, MarkerHeight);
-            float half = platoon.WatchArcDegrees * 0.5f;
-            float startBearing = platoon.WatchBearingDegrees - half;
+            Color arcColor = WithAlpha(color, WatchArcAlpha * color.a);
+            Vector3 origin = WorldMapping.ToWorld(position, MarkerHeight);
+            float half = watchArcDegrees * 0.5f;
+            float startBearing = watchBearingDegrees - half;
 
             Vector3 previous = origin + WorldMapping.BearingToWorldDirection(startBearing) * visualRange;
             AddLine(origin, previous, arcColor);
@@ -357,7 +400,7 @@ namespace MilitarySimulation.DebugView
             const int segments = 24;
             for (int i = 1; i <= segments; i++)
             {
-                float bearing = startBearing + platoon.WatchArcDegrees * i / segments;
+                float bearing = startBearing + watchArcDegrees * i / segments;
                 Vector3 next = origin + WorldMapping.BearingToWorldDirection(bearing) * visualRange;
                 AddLine(previous, next, arcColor);
                 previous = next;
@@ -366,8 +409,8 @@ namespace MilitarySimulation.DebugView
             AddLine(origin, previous, arcColor);
 
             // 경계 방향 중심선은 조금 진하게 짧게 그려서 방향을 알아보기 쉽게 한다.
-            Vector3 center = WorldMapping.BearingToWorldDirection(platoon.WatchBearingDegrees);
-            AddLine(origin, origin + center * WatchDirectionLineLength, WithAlpha(color, 0.8f));
+            Vector3 center = WorldMapping.BearingToWorldDirection(watchBearingDegrees);
+            AddLine(origin, origin + center * WatchDirectionLineLength, WithAlpha(color, 0.8f * color.a));
         }
 
         /// <summary>경계 방향 지정 중이면 선택 소대에서 커서까지 미리보기 선을 그린다.</summary>
@@ -380,7 +423,7 @@ namespace MilitarySimulation.DebugView
             }
 
             AddLine(
-                WorldMapping.ToWorld(selected.Position, MarkerHeight),
+                WorldMapping.ToWorld(_controller.GetKnownPosition(selected), MarkerHeight),
                 WorldMapping.ToWorld(_controller.CursorMapPosition, MarkerHeight),
                 _selectedColor);
         }
@@ -516,7 +559,7 @@ namespace MilitarySimulation.DebugView
             GUILayout.EndHorizontal();
 
             Platoon selected = _controller.SelectedPlatoon;
-            bool canCommand = !_controller.IsSpectating && selected != null && !selected.IsDestroyed && !selected.IsBroken;
+            bool canCommand = !_controller.IsSpectating && selected != null && !IsKnownUnableToTakeOrders(selected);
             GUI.enabled = canCommand;
 
             GUILayout.BeginHorizontal();
@@ -617,9 +660,9 @@ namespace MilitarySimulation.DebugView
                 return "선택된 소대 없음";
             }
 
-            if (selected.IsDestroyed || selected.IsBroken)
+            if (IsKnownUnableToTakeOrders(selected))
             {
-                return $"{selected.Name}: 명령 불가 ({(selected.IsDestroyed ? "전투 불능" : "사기 붕괴")})";
+                return $"{selected.Name}: 명령 불가 ({(IsKnownDestroyed(selected) ? "전투 불능" : "사기 붕괴")})";
             }
 
             if (_controller.IsTargetingWatch)
@@ -635,8 +678,29 @@ namespace MilitarySimulation.DebugView
             return "이동 방식·접촉 시는 다음 이동 명령에, 사격 방침은 바로 발신";
         }
 
+        /// <summary>
+        /// 플레이어가 아는 범위에서 명령을 받을 수 없는 소대인지. 보고가 끊긴 소대는 마지막 보고 기준이라,
+        /// 실제로는 전멸했어도 명령을 낼 수 있다(명령은 도착하지 못하고 버려진다).
+        /// </summary>
+        private bool IsKnownUnableToTakeOrders(Platoon platoon)
+        {
+            if (_controller.TryGetStaleReport(platoon, out FriendlyReport report))
+            {
+                return report.Snapshot.IsDestroyed || report.Snapshot.IsBroken;
+            }
+
+            return platoon.IsDestroyed || platoon.IsBroken;
+        }
+
+        private bool IsKnownDestroyed(Platoon platoon)
+        {
+            return _controller.TryGetStaleReport(platoon, out FriendlyReport report)
+                ? report.Snapshot.IsDestroyed
+                : platoon.IsDestroyed;
+        }
+
         /// <summary>통신 상태와 도착 대기 중인 명령. 본부는 통신 상태 대신 "본부"로 표시한다.</summary>
-        private string GetCommandText(Simulation simulation, Platoon platoon)
+        private string GetCommandText(Simulation simulation, Platoon platoon, bool isSelfDirected)
         {
             if (platoon.IsHeadquarters)
             {
@@ -649,7 +713,7 @@ namespace MilitarySimulation.DebugView
             }
 
             string text = $"통신 {DisplayNames.Of(platoon.Comms)}";
-            if (platoon.IsSelfDirected)
+            if (isSelfDirected)
             {
                 text += " · 자체 판단";
             }
@@ -693,8 +757,19 @@ namespace MilitarySimulation.DebugView
                     continue;
                 }
 
+                if (isFriendly && _controller.TryGetStaleReport(platoon, out FriendlyReport report))
+                {
+                    DrawReportedLabel(simulation, platoon, report);
+                    if (_controller.ShowTruth)
+                    {
+                        DrawWorldLabel(platoon.Position, $"[진실] {platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}");
+                    }
+
+                    continue;
+                }
+
                 string label = isFriendly
-                    ? $"{platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}\n{GetCommandText(simulation, platoon)}"
+                    ? $"{platoon.Name} {GetStateText(platoon)}\n{GetCombatText(platoon)}\n{GetCommandText(simulation, platoon, platoon.IsSelfDirected)}"
                     : $"[진실] {platoon.Name} {GetCombatText(platoon)}";
                 DrawWorldLabel(platoon.Position, label);
             }
@@ -706,6 +781,18 @@ namespace MilitarySimulation.DebugView
                     : $"접촉 {contact.ContactNumber} (소실 {simulation.FormatClock(contact.LastSeenSeconds)})";
                 DrawWorldLabel(contact.LastKnownPosition, label);
             }
+        }
+
+        /// <summary>보고가 끊긴 소대 이름표: 마지막 보고 내용과 보고 시각.</summary>
+        private void DrawReportedLabel(Simulation simulation, Platoon platoon, FriendlyReport report)
+        {
+            PlatoonSnapshot snapshot = report.Snapshot;
+            int age = simulation.ElapsedSeconds - report.ReportedAtSeconds;
+            string ageText = age < 60 ? $"{age}초 전" : $"{age / 60}분 전";
+            string label = $"{platoon.Name} {GetStateText(snapshot)}\n{GetCombatText(snapshot)}\n"
+                + $"{GetCommandText(simulation, platoon, snapshot.IsSelfDirected)}\n"
+                + $"마지막 보고 {simulation.FormatClock(report.ReportedAtSeconds)} ({ageText})";
+            DrawWorldLabel(snapshot.Position, label);
         }
 
         private void DrawWorldLabel(Vec2 position, string text)
@@ -721,7 +808,7 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 340f, 60f);
+            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 340f, 80f);
             GUI.Label(rect, text, _labelStyle);
         }
 
@@ -781,32 +868,48 @@ namespace MilitarySimulation.DebugView
 
         private static string GetStateText(Platoon platoon)
         {
-            if (platoon.IsDestroyed)
+            return FormatState(
+                platoon.IsDestroyed, platoon.IsBroken, platoon.IsMoving, platoon.CurrentMoveMode,
+                platoon.IsWatching, platoon.WatchBearingDegrees, platoon.IsPinned, platoon.IsFiring);
+        }
+
+        private static string GetStateText(PlatoonSnapshot snapshot)
+        {
+            return FormatState(
+                snapshot.IsDestroyed, snapshot.IsBroken, snapshot.IsMoving, snapshot.CurrentMoveMode,
+                snapshot.IsWatching, snapshot.WatchBearingDegrees, snapshot.IsPinned, snapshot.IsFiring);
+        }
+
+        private static string FormatState(
+            bool isDestroyed, bool isBroken, bool isMoving, MoveMode moveMode,
+            bool isWatching, float watchBearingDegrees, bool isPinned, bool isFiring)
+        {
+            if (isDestroyed)
             {
                 return "(전투 불능)";
             }
 
-            if (platoon.IsBroken)
+            if (isBroken)
             {
                 return "(사기 붕괴)";
             }
 
             string state;
-            if (platoon.IsMoving)
+            if (isMoving)
             {
-                state = $"{DisplayNames.Of(platoon.CurrentMoveMode)} 이동";
+                state = $"{DisplayNames.Of(moveMode)} 이동";
             }
             else
             {
-                state = platoon.IsWatching ? $"경계 {platoon.WatchBearingDegrees:000}" : "정지";
+                state = isWatching ? $"경계 {watchBearingDegrees:000}" : "정지";
             }
 
-            if (platoon.IsPinned)
+            if (isPinned)
             {
                 state += ", 제압됨";
             }
 
-            if (platoon.IsFiring)
+            if (isFiring)
             {
                 state += ", 사격 중";
             }
@@ -843,6 +946,11 @@ namespace MilitarySimulation.DebugView
         private static string GetCombatText(Platoon platoon)
         {
             return $"{platoon.Effective}/{platoon.InitialStrength}명 사기 {platoon.Morale:0} 제압 {platoon.Suppression:0}";
+        }
+
+        private static string GetCombatText(PlatoonSnapshot snapshot)
+        {
+            return $"{snapshot.Effective}/{snapshot.InitialStrength}명 사기 {snapshot.Morale:0} 제압 {snapshot.Suppression:0}";
         }
     }
 }
