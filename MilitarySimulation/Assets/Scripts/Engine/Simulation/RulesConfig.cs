@@ -2,25 +2,16 @@ namespace MilitarySimulation.Engine
 {
     /// <summary>
     /// 규칙 수치. 코드가 아니라 이 값들을 바꿔서 밸런스를 맞춘다.
+    /// 모든 부대에 똑같이 적용되는 판정 규칙만 둔다. 부대마다 다른 수치(속도·눈높이·관측 거리·화력·안테나)는 UnitType에 있다.
     /// 지금은 기본값을 코드에 두고, 시나리오 데이터 파일은 이후 단계에서 붙인다.
     /// 모든 값은 콘솔/테스트에서 조정할 초기 추정치다.
     /// </summary>
     public class RulesConfig
     {
-        // 이동 속도 (m/s). 일반 1.1 m/s ≈ 시속 4km (기획서 9장 기준).
-        public float FastSpeed = 1.8f;
-        public float NormalSpeed = 1.1f;
-        public float StealthSpeed = 0.5f;
-        public float ForestSpeedMultiplier = 0.6f;
-        public float RoadSpeedMultiplier = 1.2f;
-
         // 시야선 (m)
-        public float EyeHeight = 1.8f;
-        public float TargetHeight = 1.2f;
         public float ForestCanopyHeight = 12f;
 
-        // 탐지. 분당 확률로 정의하고 틱 길이에 맞게 환산한다.
-        public float MaxVisualRange = 800f;
+        // 탐지. 분당 확률로 정의하고 틱 길이에 맞게 환산한다. 최대 관측 거리는 UnitType.MaxVisualRange.
         public float BaseDetectionPerMinute = 0.6f;
 
         // 표적 상태 보정 (기획서 4.4 "탐지되기")
@@ -48,15 +39,7 @@ namespace MilitarySimulation.Engine
         /// <summary>시야선이 끊긴 확인 접촉이 "소실"로 바뀌기까지의 시간(초).</summary>
         public int ContactLostSeconds = 30;
 
-        // 교전: 사거리 (m)
-        public float FireRange = 400f;
-        public float CloseFireRange = 150f;
-
-        /// <summary>
-        /// 사수 1명이 분당 적 1명을 무력화할 확률(사거리 0, 개활지, 정지 표적 보정 1 기준).
-        /// 사거리에 따라 선형으로 줄어든다.
-        /// </summary>
-        public float BaseCasualtyPerShooterPerMinute = 0.12f;
+        // 교전: 사거리와 기본 무력화 확률은 UnitType.Weapon(WeaponProfile).
 
         // 교전: 표적 노출 보정 (움직이는 표적이 더 잘 맞는다)
         public float TargetExposureFast = 1.5f;
@@ -109,8 +92,6 @@ namespace MilitarySimulation.Engine
         public float VoiceRange = 50f;
 
         public float RadioRange = 5000f;
-        public float HeadquartersAntennaHeight = 3f;
-        public float UnitAntennaHeight = 2f;
 
         /// <summary>가시선 무전 직선 위로 지형이 이 높이(m)를 넘게 솟으면 두절, 그 이하로 걸리면 저하.</summary>
         public float RadioShadowCutDepth = 15f;

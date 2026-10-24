@@ -12,6 +12,9 @@ namespace MilitarySimulation.Engine.Tests
     {
         private const float CellSize = 10f;
 
+        /// <summary>시야선 테스트용 눈높이·표적 높이. 읽기만 한다.</summary>
+        private static readonly UnitType Infantry = UnitTypes.CreateInfantryPlatoon();
+
         [Test]
         public void P5_ReverseSlope_HidesObserverBehindCrest()
         {
@@ -20,7 +23,7 @@ namespace MilitarySimulation.Engine.Tests
 
             // 능선(y=300) 북쪽 100m 역사면의 관측자 → 남쪽 개활지의 표적
             bool canSee = LineOfSight.HasLineOfSight(
-                map, new Vec2(15f, 400f), rules.EyeHeight, new Vec2(15f, 100f), rules.TargetHeight, rules.ForestCanopyHeight);
+                map, new Vec2(15f, 400f), Infantry.EyeHeight, new Vec2(15f, 100f), Infantry.TargetHeight, rules.ForestCanopyHeight);
 
             Assert.IsFalse(canSee);
         }
@@ -32,7 +35,7 @@ namespace MilitarySimulation.Engine.Tests
             var rules = new RulesConfig();
 
             bool canSee = LineOfSight.HasLineOfSight(
-                map, new Vec2(15f, 300f), rules.EyeHeight, new Vec2(15f, 100f), rules.TargetHeight, rules.ForestCanopyHeight);
+                map, new Vec2(15f, 300f), Infantry.EyeHeight, new Vec2(15f, 100f), Infantry.TargetHeight, rules.ForestCanopyHeight);
 
             Assert.IsTrue(canSee);
         }
@@ -44,7 +47,7 @@ namespace MilitarySimulation.Engine.Tests
             var rules = new RulesConfig();
 
             bool canSee = LineOfSight.HasLineOfSight(
-                map, new Vec2(15f, 10f), rules.EyeHeight, new Vec2(15f, 580f), rules.TargetHeight, rules.ForestCanopyHeight);
+                map, new Vec2(15f, 10f), Infantry.EyeHeight, new Vec2(15f, 580f), Infantry.TargetHeight, rules.ForestCanopyHeight);
 
             Assert.IsTrue(canSee);
         }
@@ -56,7 +59,7 @@ namespace MilitarySimulation.Engine.Tests
             var rules = new RulesConfig();
 
             bool canSee = LineOfSight.HasLineOfSight(
-                map, new Vec2(15f, 50f), rules.EyeHeight, new Vec2(15f, 400f), rules.TargetHeight, rules.ForestCanopyHeight);
+                map, new Vec2(15f, 50f), Infantry.EyeHeight, new Vec2(15f, 400f), Infantry.TargetHeight, rules.ForestCanopyHeight);
 
             Assert.IsFalse(canSee);
         }
@@ -69,7 +72,7 @@ namespace MilitarySimulation.Engine.Tests
 
             // 숲(y 200~260) 북쪽 가장자리 안쪽 5m에 선 관측자 → 북쪽 개활지
             bool canSee = LineOfSight.HasLineOfSight(
-                map, new Vec2(15f, 255f), rules.EyeHeight, new Vec2(15f, 500f), rules.TargetHeight, rules.ForestCanopyHeight);
+                map, new Vec2(15f, 255f), Infantry.EyeHeight, new Vec2(15f, 500f), Infantry.TargetHeight, rules.ForestCanopyHeight);
 
             Assert.IsTrue(canSee);
         }

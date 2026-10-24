@@ -110,8 +110,9 @@ namespace MilitarySimulation.Engine.Tests
         [Test]
         public void DestroyedWhileCut_HeadquartersIsNotTold_AndHeldOrderRemains()
         {
-            var rules = new RulesConfig { BaseDetectionPerMinute = 5f, BaseCasualtyPerShooterPerMinute = 50f, BreakMorale = 0f };
+            var rules = new RulesConfig { BaseDetectionPerMinute = 5f, BreakMorale = 0f };
             Simulation simulation = CreateNetwork(rules, out _, out Platoon platoon, out Platoon enemy);
+            enemy.UnitType.Weapon.CasualtyPerShooterPerMinute = 50f;
             enemy.FirePolicy = FirePolicy.Free;
             platoon.FirePolicy = FirePolicy.HoldFire;
             simulation.AddJammingZone(new JammingZone(platoon.Position, 100f, JammingStrength.Block, Side.Blue));

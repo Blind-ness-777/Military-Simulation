@@ -12,11 +12,21 @@ namespace MilitarySimulation.Engine
         private readonly List<Vec2> _trail = new List<Vec2>();
 
         internal Platoon(
-            int id, string name, Side side, Vec2 position, float facingDegrees, int strength, float morale, PlatoonRole role)
+            int id,
+            string name,
+            Side side,
+            Vec2 position,
+            float facingDegrees,
+            int strength,
+            float morale,
+            PlatoonRole role,
+            UnitType unitType)
         {
             Id = id;
             Name = name;
             Side = side;
+            UnitType = unitType;
+            CommsEquipment = unitType.DefaultCommsEquipment;
             Position = position;
             FacingDegrees = facingDegrees;
             SegmentStart = position;
@@ -31,6 +41,9 @@ namespace MilitarySimulation.Engine
         public string Name { get; }
         public Side Side { get; }
         public PlatoonRole Role { get; }
+
+        /// <summary>병과. 이동·관측·화력·통신 장비 수치를 여기서 읽는다.</summary>
+        public UnitType UnitType { get; }
         public bool IsHeadquarters => Role == PlatoonRole.Headquarters;
         public Vec2 Position { get; internal set; }
 
@@ -86,10 +99,10 @@ namespace MilitarySimulation.Engine
         internal bool WasInContact { get; set; }
 
         /// <summary>
-        /// 가진 통신 수단. 기본은 가시선 무전기. 본부가 통신병을 잃으면 None이 된다
+        /// 가진 통신 수단. 처음 값은 병과의 DefaultCommsEquipment. 본부가 통신병을 잃으면 None이 된다
         /// (통신 장비를 통신병이 운용한다고 본다).
         /// </summary>
-        public CommsEquipment CommsEquipment { get; internal set; } = CommsEquipment.LineOfSightRadio;
+        public CommsEquipment CommsEquipment { get; internal set; }
 
         /// <summary>본부와의 통신 상태. 본부가 없는 진영은 항상 Normal.</summary>
         public CommsState Comms { get; internal set; } = CommsState.Normal;

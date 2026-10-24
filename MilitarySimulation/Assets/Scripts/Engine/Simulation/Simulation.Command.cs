@@ -377,8 +377,8 @@ namespace MilitarySimulation.Engine
             CommsEquipment shared = headquarters.CommsEquipment & platoon.CommsEquipment;
 
             bool satcomAvailable = (shared & CommsEquipment.Satcom) != 0
-                && HasSkyView(headquarters.Position)
-                && HasSkyView(platoon.Position);
+                && HasSkyView(headquarters)
+                && HasSkyView(platoon);
             if (satcomAvailable)
             {
                 return CommsState.Normal;
@@ -392,9 +392,9 @@ namespace MilitarySimulation.Engine
             float obstruction = LineOfSight.GetMaxTerrainObstruction(
                 Map,
                 headquarters.Position,
-                Rules.HeadquartersAntennaHeight,
+                headquarters.UnitType.AntennaHeight,
                 platoon.Position,
-                Rules.UnitAntennaHeight);
+                platoon.UnitType.AntennaHeight);
 
             if (obstruction <= 0f)
             {
@@ -407,14 +407,15 @@ namespace MilitarySimulation.Engine
         /// <summary>
         /// 위성통신용 하늘 시야. 숲 안이거나, 주변 8방향 지형이 마스크 각도보다 높게 솟아 있으면 막힌 것으로 본다.
         /// </summary>
-        private bool HasSkyView(Vec2 position)
+        private bool HasSkyView(Platoon platoon)
         {
+            Vec2 position = platoon.Position;
             if (Map.GetTerrainAt(position) == TerrainType.Forest)
             {
                 return false;
             }
 
-            float baseHeight = Map.GetHeightAt(position) + Rules.UnitAntennaHeight;
+            float baseHeight = Map.GetHeightAt(position) + platoon.UnitType.AntennaHeight;
             double maskSlope = Math.Tan(Rules.SatcomMaskAngleDegrees * Math.PI / 180.0);
             float step = Map.CellSize;
 
