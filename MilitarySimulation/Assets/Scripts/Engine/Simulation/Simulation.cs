@@ -5,9 +5,9 @@ namespace MilitarySimulation.Engine
 {
     /// <summary>
     /// 시뮬레이션 본체. 실제 상태(진실)를 갖고, 고정 1초 틱으로 진행한다.
-    /// 틱 순서: 통신 판정 → 명령 도착 → 이동 → 탐지(진영 원장 갱신) → 교전(동시 사격) → 제압·사기
-    ///          → 접촉 시 행동 → 자체 판단 모드 → 인원 검산.
-    /// 명령·통신·자체 판단은 Simulation.Command.cs에 있다(같은 클래스를 파일만 나눔).
+    /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
+    ///          → 제압·사기 → 접촉 시 행동 → 자체 판단 모드 → 상태 보고 → 인원 검산.
+    /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
     public partial class Simulation
     {
@@ -20,7 +20,6 @@ namespace MilitarySimulation.Engine
         private readonly Dictionary<int, Platoon> _platoonsById = new Dictionary<int, Platoon>();
         private readonly List<SimEvent> _events = new List<SimEvent>();
         private readonly Dictionary<Side, SideIntel> _intel = new Dictionary<Side, SideIntel>();
-        private readonly Dictionary<int, Platoon> _observedThisTick = new Dictionary<int, Platoon>();
         private readonly List<PendingFire> _pendingFire = new List<PendingFire>();
         private readonly DeterministicRandom _random;
         private int _nextPlatoonId = 1;
@@ -83,12 +82,14 @@ namespace MilitarySimulation.Engine
             ElapsedSeconds += TickSeconds;
             UpdateComms();
             DeliverPendingOrders();
+            DeliverReports();
             UpdateMovement();
             UpdateDetection();
             UpdateCombat();
             UpdateSuppressionAndMorale();
             UpdateContactReactions();
             UpdateSelfDirected();
+            QueueStatusReports();
             VerifyStrengthLedger();
         }
 
@@ -187,7 +188,7 @@ namespace MilitarySimulation.Engine
 
                         if (!platoon.IsMoving)
                         {
-                            Log(platoon.Side, $"{platoon.Name} {Map.GetGridReference(target)} 도착");
+                            Report(platoon, $"{platoon.Name} {Map.GetGridReference(target)} 도착");
                         }
                     }
                     else
@@ -206,76 +207,61 @@ namespace MilitarySimulation.Engine
             }
         }
 
+        /// <summary>
+        /// 소대마다 따로 탐지한다(소대 인지). 이미 추적 중인 표적은 시야선이 유지되는 한 재판정 없이 계속 추적한다.
+        /// 본 것은 보고로 본부에 올라가고, 진영 상황판은 보고가 도착했을 때 갱신된다(Simulation.Reports.cs).
+        /// </summary>
         private void UpdateDetection()
         {
-            foreach (Side side in AllSides)
+            foreach (Platoon observer in _platoons)
             {
-                SideIntel intel = _intel[side];
-                _observedThisTick.Clear();
-
-                foreach (Platoon observer in _platoons)
-                {
-                    if (observer.Side != side || observer.IsDestroyed)
-                    {
-                        continue;
-                    }
-
-                    foreach (Platoon target in _platoons)
-                    {
-                        if (target.Side == side || target.IsDestroyed || _observedThisTick.ContainsKey(target.Id))
-                        {
-                            continue;
-                        }
-
-                        if (!CanObserve(observer, target))
-                        {
-                            continue;
-                        }
-
-                        // 이미 확인 중인 접촉은 시야선이 유지되는 한 계속 추적한다(재판정 없음).
-                        bool alreadyTracked = intel.TryGetContact(target.Id, out Contact existing)
-                            && existing.Confidence == ContactConfidence.Confirmed;
-
-                        if (alreadyTracked || _random.NextDouble() < GetDetectionChancePerTick(observer, target))
-                        {
-                            _observedThisTick.Add(target.Id, observer);
-                        }
-                    }
-                }
-
-                ApplyObservations(intel);
-                MarkLostContacts(intel);
-            }
-        }
-
-        private void ApplyObservations(SideIntel intel)
-        {
-            // 로그 순서가 결정론적이도록 Dictionary 순회 대신 부대 목록 순서로 처리한다.
-            foreach (Platoon target in _platoons)
-            {
-                if (!_observedThisTick.TryGetValue(target.Id, out Platoon observer))
+                if (observer.IsDestroyed)
                 {
                     continue;
                 }
 
-                bool isNew = !intel.TryGetContact(target.Id, out Contact contact);
-                if (isNew)
+                foreach (Platoon target in _platoons)
                 {
-                    contact = intel.AddContact(target.Id);
+                    if (target.Side == observer.Side || target.IsDestroyed || !CanObserve(observer, target))
+                    {
+                        continue;
+                    }
+
+                    observer.KnownEnemies.TryGetValue(target.Id, out LocalContact local);
+                    bool tracking = local != null && local.IsTracking;
+                    if (!tracking && _random.NextDouble() >= GetDetectionChancePerTick(observer, target))
+                    {
+                        continue;
+                    }
+
+                    if (local == null)
+                    {
+                        local = new LocalContact(target.Id);
+                        observer.KnownEnemies.Add(target.Id, local);
+                    }
+
+                    local.LastKnownPosition = target.Position;
+                    local.LastSeenSeconds = ElapsedSeconds;
+                    local.IsTracking = true;
+                    ReportSighting(observer, target, !tracking);
                 }
 
-                bool wasConfirmed = !isNew && contact.Confidence == ContactConfidence.Confirmed;
-                contact.LastKnownPosition = target.Position;
-                contact.LastSeenSeconds = ElapsedSeconds;
-                contact.Confidence = ContactConfidence.Confirmed;
+                LoseLocalContacts(observer);
+            }
 
-                if (!wasConfirmed)
+            foreach (Side side in AllSides)
+            {
+                MarkLostContacts(_intel[side]);
+            }
+        }
+
+        private void LoseLocalContacts(Platoon observer)
+        {
+            foreach (LocalContact local in observer.KnownEnemies.Values)
+            {
+                if (local.IsTracking && ElapsedSeconds - local.LastSeenSeconds >= Rules.ContactLostSeconds)
                 {
-                    float distance = Vec2.Distance(observer.Position, target.Position);
-                    float bearing = Bearing.Between(observer.Position, target.Position);
-                    string kind = isNew ? "적 발견" : "적 재발견";
-                    Log(intel.Side,
-                        $"{observer.Name}: {kind} — 접촉 {contact.ContactNumber}, 방위 {bearing:000} 약 {RoundDistance(distance)}m ({Map.GetGridReference(target.Position)})");
+                    local.IsTracking = false;
                 }
             }
         }
@@ -372,16 +358,11 @@ namespace MilitarySimulation.Engine
             Platoon best = null;
             float bestDistance = float.MaxValue;
 
-            // 사격은 자기 진영 정보에서 "확인"된 접촉에만 한다(기획서 5.4).
-            foreach (Contact contact in _intel[shooter.Side].Contacts)
+            // 사격은 "확인"된 적에게만 한다(기획서 5.4). 자기가 추적 중인 적, 또는 통신이 되면 본부 상황판의 확인된 접촉.
+            // 부대 목록 순서로 순회해서 같은 거리면 결과가 결정론적이다.
+            foreach (Platoon target in _platoons)
             {
-                if (contact.Confidence != ContactConfidence.Confirmed)
-                {
-                    continue;
-                }
-
-                Platoon target = _platoonsById[contact.TargetId];
-                if (target.IsDestroyed)
+                if (target.Side == shooter.Side || target.IsDestroyed || !TryGetKnownEnemyPosition(shooter, target, out _))
                 {
                     continue;
                 }
@@ -409,13 +390,16 @@ namespace MilitarySimulation.Engine
 
             if (newTarget == null)
             {
-                Log(shooter.Side, $"{shooter.Name} 사격 중지");
+                Report(shooter, $"{shooter.Name} 사격 중지");
                 return;
             }
 
-            _intel[shooter.Side].TryGetContact(newTarget.Id, out Contact contact);
+            // 발견 보고가 아직 본부에 도착하지 않았으면 상황판 접촉 번호가 없다.
+            string targetName = _intel[shooter.Side].TryGetContact(newTarget.Id, out Contact contact)
+                ? $"접촉 {contact.ContactNumber}"
+                : "적";
             float distance = Vec2.Distance(shooter.Position, newTarget.Position);
-            Log(shooter.Side, $"{shooter.Name} 사격 개시 → 접촉 {contact.ContactNumber} (약 {RoundDistance(distance)}m)");
+            Report(shooter, $"{shooter.Name} 사격 개시 → {targetName} (약 {RoundDistance(distance)}m)");
         }
 
         private int ApplyCasualties(Platoon target, int hits)
@@ -446,16 +430,25 @@ namespace MilitarySimulation.Engine
             target.Wounded += wounded;
             target.Morale = Math.Max(0f, target.Morale - casualties * Rules.MoraleLossPerCasualty);
 
-            Log(target.Side,
+            Report(target,
                 $"{target.Name} 피해: 전사 {killed}, 부상 {wounded} (전투 가능 {target.Effective}/{target.InitialStrength})");
 
             if (target.IsDestroyed)
             {
                 target.Hold();
                 target.CurrentTargetId = 0;
-                RemovePendingOrders(target);
-                Log(target.Side,
+
+                // 본부가 바로 알 수 있을 때만 대기 명령을 거둔다. 모르면 명령은 남고, 도착 시점에 버려진다.
+                if (IsReportingLive(target))
+                {
+                    RemovePendingOrders(target);
+                }
+
+                Report(target,
                     target.IsHeadquarters ? $"{target.Name} 전투 불능 — 지휘 상실" : $"{target.Name} 전투 불능");
+
+                // 통신 저하 중이면 전투 불능 상태를 마지막 보고로 보낸다(이후 통신 판정에서 빠진다).
+                ReportStatus(target);
             }
 
             return casualties;
@@ -500,7 +493,7 @@ namespace MilitarySimulation.Engine
             }
 
             platoon.IsPinned = pinned;
-            Log(platoon.Side, pinned ? $"{platoon.Name} 제압됨 — 이동 불가" : $"{platoon.Name} 제압 해소");
+            Report(platoon, pinned ? $"{platoon.Name} 제압됨 — 이동 불가" : $"{platoon.Name} 제압 해소");
         }
 
         private void UpdateBroken(Platoon platoon, bool underFire)
@@ -510,18 +503,18 @@ namespace MilitarySimulation.Engine
                 platoon.IsBroken = true;
                 platoon.CurrentTargetId = 0;
                 Vec2 retreatPoint = StartBrokenRetreat(platoon);
-                Log(platoon.Side, $"{platoon.Name} 사기 붕괴 — {Map.GetGridReference(retreatPoint)}로 무질서 후퇴, 명령 불가");
+                Report(platoon, $"{platoon.Name} 사기 붕괴 — {Map.GetGridReference(retreatPoint)}로 무질서 후퇴, 명령 불가");
             }
             else if (platoon.IsBroken && !platoon.IsMoving && underFire)
             {
                 // 후퇴한 곳에서도 계속 사격을 받으면 더 물러난다.
                 Vec2 retreatPoint = StartBrokenRetreat(platoon);
-                Log(platoon.Side, $"{platoon.Name} 계속 피격 — {Map.GetGridReference(retreatPoint)}로 추가 후퇴");
+                Report(platoon, $"{platoon.Name} 계속 피격 — {Map.GetGridReference(retreatPoint)}로 추가 후퇴");
             }
             else if (platoon.IsBroken && platoon.Morale >= Rules.RallyMorale)
             {
                 platoon.IsBroken = false;
-                Log(platoon.Side, $"{platoon.Name} 재집결 — 명령 가능");
+                Report(platoon, $"{platoon.Name} 재집결 — 명령 가능");
             }
         }
 
@@ -533,34 +526,36 @@ namespace MilitarySimulation.Engine
         }
 
         /// <summary>
-        /// 붕괴한 소대의 후퇴 지점: 자기 진영이 아는 가장 가까운 확인된 적의 반대 방향으로 BrokenRetreatDistance.
-        /// 아는 적이 없으면 현재 구간의 출발 지점.
+        /// 붕괴한 소대의 후퇴 지점: 이 소대가 아는 가장 가까운 확인된 적의 반대 방향으로 BrokenRetreatDistance.
+        /// (자기가 추적 중인 적, 통신이 되면 본부 상황판의 확인된 접촉까지.) 아는 적이 없으면 현재 구간의 출발 지점.
         /// </summary>
         private Vec2 GetBrokenRetreatPoint(Platoon platoon)
         {
-            Contact nearest = null;
+            bool found = false;
+            Vec2 nearest = default;
             float nearestDistance = float.MaxValue;
-            foreach (Contact contact in _intel[platoon.Side].Contacts)
+            foreach (Platoon enemy in _platoons)
             {
-                if (contact.Confidence != ContactConfidence.Confirmed)
+                if (enemy.Side == platoon.Side || !TryGetKnownEnemyPosition(platoon, enemy, out Vec2 position))
                 {
                     continue;
                 }
 
-                float distance = Vec2.Distance(platoon.Position, contact.LastKnownPosition);
+                float distance = Vec2.Distance(platoon.Position, position);
                 if (distance < nearestDistance)
                 {
-                    nearest = contact;
+                    found = true;
+                    nearest = position;
                     nearestDistance = distance;
                 }
             }
 
-            if (nearest == null)
+            if (!found)
             {
                 return platoon.SegmentStart;
             }
 
-            Vec2 away = (platoon.Position - nearest.LastKnownPosition).Normalized;
+            Vec2 away = (platoon.Position - nearest).Normalized;
             return Map.ClampInside(platoon.Position + away * Rules.BrokenRetreatDistance);
         }
 
@@ -596,11 +591,11 @@ namespace MilitarySimulation.Engine
             {
                 case ContactBehavior.TakeCover:
                     platoon.Hold();
-                    Log(platoon.Side, $"{platoon.Name} 접촉 — 엄폐 후 응사");
+                    Report(platoon, $"{platoon.Name} 접촉 — 엄폐 후 응사");
                     break;
 
                 case ContactBehavior.PushThrough:
-                    Log(platoon.Side, $"{platoon.Name} 접촉 — 돌파 계속");
+                    Report(platoon, $"{platoon.Name} 접촉 — 돌파 계속");
                     break;
 
                 case ContactBehavior.FallBack:
@@ -608,7 +603,7 @@ namespace MilitarySimulation.Engine
                     platoon.SetPath(
                         new[] { new Waypoint(fallBackPoint, MoveMode.Fast, ContactBehavior.PushThrough) },
                         false);
-                    Log(platoon.Side, $"{platoon.Name} 접촉 — {Map.GetGridReference(fallBackPoint)}로 후퇴");
+                    Report(platoon, $"{platoon.Name} 접촉 — {Map.GetGridReference(fallBackPoint)}로 후퇴");
                     break;
             }
         }

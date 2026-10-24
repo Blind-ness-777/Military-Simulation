@@ -129,6 +129,12 @@ namespace MilitarySimulation.Engine
         public int NormalCommandDelaySeconds = 2;
         public int DegradedCommandDelaySeconds = 15;
 
+        // 보고 지연(초). 정상·직접 통신이면 소대 보고가 즉시 본부 상황판에 반영된다.
+        public int DegradedReportDelaySeconds = 15;
+
+        /// <summary>통신 저하 중 위치·관측 보고를 보내는 간격(초). 새 발견과 사건 보고는 간격과 상관없이 바로 보낸다.</summary>
+        public int ReportSampleIntervalSeconds = 5;
+
         /// <summary>통신병 1명이 본부 사상자 중에 포함될 확률을 정하는 통신병 수.</summary>
         public int HeadquartersRadioOperators = 1;
 

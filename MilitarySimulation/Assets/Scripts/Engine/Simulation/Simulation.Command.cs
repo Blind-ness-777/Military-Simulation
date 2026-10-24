@@ -103,17 +103,19 @@ namespace MilitarySimulation.Engine
         /// 명령을 발신한다. 본부가 없는 진영이나 본부 자신에게 내리는 명령은 즉시 적용한다.
         /// 그 외에는 같은 부대에 대기 중인 이전 명령을 취소하고, 통신 상태에 따라 도착 시각을 정한다.
         /// 단, 경로 추가(Append) 이동은 이전 대기 명령 뒤에 이어 붙어야 하므로 취소하지 않고, 그보다 먼저 도착하지 않게 한다.
+        /// 통신망을 쓰는 명령은 발신 시점에 소대의 실제 상태(전멸·붕괴)를 검사하지 않는다.
+        /// 본부는 보고로만 알기 때문이다. 받을 수 없는 명령은 도착 시점에 처리한다(DeliverPendingOrders).
         /// </summary>
         private void SubmitOrder(PendingOrder order)
         {
             Platoon platoon = order.Platoon;
-            if (!CanTakeOrders(platoon))
-            {
-                return;
-            }
-
             if (!UsesCommandNetwork(platoon))
             {
+                if (!CanTakeOrders(platoon))
+                {
+                    return;
+                }
+
                 ApplyOrder(order);
                 Log(platoon.Side, $"명령: {order.Description}");
                 return;
@@ -250,13 +252,21 @@ namespace MilitarySimulation.Engine
                 _pendingOrders.RemoveAt(i);
                 i--;
 
-                if (!CanTakeOrders(order.Platoon))
+                Platoon platoon = order.Platoon;
+                if (platoon.IsDestroyed)
                 {
+                    // 받을 사람이 없다. 본부는 응답이 없다는 것만 안다.
+                    continue;
+                }
+
+                if (platoon.IsBroken)
+                {
+                    Report(platoon, $"명령 불가: {platoon.Name} 사기 붕괴");
                     continue;
                 }
 
                 ApplyOrder(order);
-                Log(order.Platoon.Side, $"명령 수신: {order.Description}");
+                Report(platoon, $"명령 수신: {order.Description}");
             }
         }
 
@@ -285,7 +295,8 @@ namespace MilitarySimulation.Engine
         }
 
         /// <summary>
-        /// 통신 상태 변경은 모두 여기를 거친다. 두절 시작 시각 기록, 보류 명령 출발, 로그를 한곳에서 처리한다.
+        /// 통신 상태 변경은 모두 여기를 거친다. 두절 시작 시각 기록, 보류 명령·보고 출발,
+        /// 실시간 보고가 끊기는 순간의 상태 기록, 로그를 한곳에서 처리한다.
         /// </summary>
         private void SetComms(Platoon platoon, CommsState current)
         {
@@ -295,7 +306,13 @@ namespace MilitarySimulation.Engine
                 return;
             }
 
+            bool wasLive = IsReportingLive(platoon);
             platoon.Comms = current;
+            if (wasLive && !IsReportingLive(platoon))
+            {
+                OnReportingLiveLost(platoon);
+            }
+
             if (current == CommsState.Cut)
             {
                 platoon.CommsCutSinceSeconds = ElapsedSeconds;
@@ -303,6 +320,7 @@ namespace MilitarySimulation.Engine
             else if (previous == CommsState.Cut)
             {
                 ReleaseHeldOrders(platoon);
+                ReleaseHeldReports(platoon);
             }
 
             // 직접 ↔ 정상 전환은 평범한 일이라 로그를 남기지 않는다.
@@ -481,7 +499,7 @@ namespace MilitarySimulation.Engine
                     {
                         platoon.IsSelfDirected = false;
                         platoon.SelfDirectedStage = 0;
-                        Log(platoon.Side, $"{platoon.Name} 연락 회복 — 지휘 복귀");
+                        Report(platoon, $"{platoon.Name} 연락 회복 — 지휘 복귀");
                     }
 
                     continue;
@@ -494,7 +512,7 @@ namespace MilitarySimulation.Engine
                     {
                         platoon.IsSelfDirected = true;
                         platoon.SelfDirectedStage = 0;
-                        Log(platoon.Side, $"{platoon.Name} 연락 두절 지속 — 자체 판단 모드(고수)");
+                        Report(platoon, $"{platoon.Name} 연락 두절 지속 — 자체 판단 모드(고수)");
                     }
 
                     continue;
@@ -505,13 +523,13 @@ namespace MilitarySimulation.Engine
                 {
                     platoon.SelfDirectedStage = 2;
                     StartTrailRetreat(platoon, float.MaxValue);
-                    Log(platoon.Side, $"{platoon.Name} 자체 판단: 피해 과다 — 왔던 길로 철수");
+                    Report(platoon, $"{platoon.Name} 자체 판단: 피해 과다 — 왔던 길로 철수");
                 }
                 else if (platoon.SelfDirectedStage < 1 && strengthRatio <= Rules.SelfDirectedRetreatStrength)
                 {
                     platoon.SelfDirectedStage = 1;
                     StartTrailRetreat(platoon, Rules.SelfDirectedRetreatDistance);
-                    Log(platoon.Side, $"{platoon.Name} 자체 판단: 피해 누적 — 왔던 길로 후퇴");
+                    Report(platoon, $"{platoon.Name} 자체 판단: 피해 누적 — 왔던 길로 후퇴");
                 }
             }
         }

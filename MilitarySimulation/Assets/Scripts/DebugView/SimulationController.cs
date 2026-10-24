@@ -116,6 +116,27 @@ namespace MilitarySimulation.DebugView
             _unitView.Refresh();
         }
 
+        /// <summary>
+        /// 플레이어(본부)가 이 소대를 실시간으로 모르면 마지막 보고를 돌려준다.
+        /// 실시간 보고 중이거나 관전 모드면 false(실제 상태를 그대로 그린다).
+        /// </summary>
+        public bool TryGetStaleReport(Platoon platoon, out FriendlyReport report)
+        {
+            report = null;
+            if (IsSpectating || _simulation.IsReportingLive(platoon))
+            {
+                return false;
+            }
+
+            return _simulation.TryGetLastReport(platoon, out report);
+        }
+
+        /// <summary>플레이어 화면에 그리는 소대 위치. 보고가 끊긴 소대는 마지막 보고 위치다.</summary>
+        public Vec2 GetKnownPosition(Platoon platoon)
+        {
+            return TryGetStaleReport(platoon, out FriendlyReport report) ? report.Snapshot.Position : platoon.Position;
+        }
+
         private void CheckSpectateMode()
         {
             if (IsSpectating || !_simulation.IsHeadquartersLost(PlayerSide))
@@ -283,7 +304,8 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            float bearing = Bearing.Between(selected.Position, CursorMapPosition);
+            // 플레이어가 보는 위치 기준으로 방향을 잡는다(보고가 끊긴 소대는 마지막 보고 위치).
+            float bearing = Bearing.Between(GetKnownPosition(selected), CursorMapPosition);
             _simulation.OrderWatch(selected, bearing, DefaultWatchArcDegrees);
         }
 
@@ -298,7 +320,7 @@ namespace MilitarySimulation.DebugView
             float nearestDistance = SelectPickRadiusPixels;
             foreach (Platoon platoon in _friendlyPlatoons)
             {
-                Vector3 screen = _camera.WorldToScreenPoint(WorldMapping.ToWorld(platoon.Position));
+                Vector3 screen = _camera.WorldToScreenPoint(WorldMapping.ToWorld(GetKnownPosition(platoon)));
                 if (screen.z < 0f)
                 {
                     continue;
