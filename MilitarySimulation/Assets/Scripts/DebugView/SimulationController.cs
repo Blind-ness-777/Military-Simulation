@@ -58,6 +58,12 @@ namespace MilitarySimulation.DebugView
         /// <summary>경계 버튼을 누른 뒤, 지도에서 방향을 찍기를 기다리는 중인지.</summary>
         public bool IsTargetingWatch { get; private set; }
 
+        /// <summary>
+        /// 본부가 전멸해 관전 모드인지. 명령은 막히고, 실제 전황이 보이고, 최고 배속이 된다.
+        /// 남은 소대는 마지막 명령과 자체 판단 모드로 움직인다.
+        /// </summary>
+        public bool IsSpectating { get; private set; }
+
         public Platoon SelectedPlatoon => _friendlyPlatoons.Count > 0 ? _friendlyPlatoons[_selectedIndex] : null;
 
         /// <summary>마우스 커서가 지도 위에 있는지. HUD의 커서 정보(고도·지형) 표시에 쓴다.</summary>
@@ -106,7 +112,21 @@ namespace MilitarySimulation.DebugView
             HandleKeyboard();
             HandleMouse();
             AdvanceSimulation();
+            CheckSpectateMode();
             _unitView.Refresh();
+        }
+
+        private void CheckSpectateMode()
+        {
+            if (IsSpectating || !_simulation.IsHeadquartersLost(PlayerSide))
+            {
+                return;
+            }
+
+            IsSpectating = true;
+            IsTargetingWatch = false;
+            ShowTruth = true;
+            _speedIndex = SpeedStepCount - 1;
         }
 
         public void SelectPlatoon(Platoon platoon)
@@ -131,11 +151,11 @@ namespace MilitarySimulation.DebugView
             OrderContactBehavior = contactBehavior;
         }
 
-        /// <summary>사격 방침은 다음 명령이 아니라 선택한 소대에 즉시 적용한다.</summary>
+        /// <summary>사격 방침은 다음 이동 명령에 붙지 않고, 선택한 소대에 바로 발신한다(통신을 거쳐 도착).</summary>
         public void SetSelectedFirePolicy(FirePolicy firePolicy)
         {
             Platoon selected = SelectedPlatoon;
-            if (selected == null || selected.FirePolicy == firePolicy)
+            if (IsSpectating || selected == null || selected.FirePolicy == firePolicy)
             {
                 return;
             }
@@ -145,7 +165,7 @@ namespace MilitarySimulation.DebugView
 
         public void BeginWatchTargeting()
         {
-            if (SelectedPlatoon != null)
+            if (!IsSpectating && SelectedPlatoon != null)
             {
                 IsTargetingWatch = true;
             }
@@ -159,7 +179,7 @@ namespace MilitarySimulation.DebugView
         public void HoldSelected()
         {
             Platoon selected = SelectedPlatoon;
-            if (selected != null)
+            if (!IsSpectating && selected != null)
             {
                 IsTargetingWatch = false;
                 _simulation.OrderHold(selected);
@@ -244,7 +264,7 @@ namespace MilitarySimulation.DebugView
             }
 
             Platoon selected = SelectedPlatoon;
-            if (selected == null || !HasCursorMapPosition)
+            if (IsSpectating || selected == null || !HasCursorMapPosition)
             {
                 return;
             }
