@@ -157,7 +157,7 @@ namespace MilitarySimulation.DebugView
                 Color color = platoon == selected ? _selectedColor : _friendlyColor;
                 if (_controller.TryGetStaleReport(platoon, out FriendlyReport report))
                 {
-                    AddReportedPlatoon(report.Snapshot, color, simulation.Rules.MaxVisualRange);
+                    AddReportedPlatoon(report.Snapshot, color, platoon.UnitType.MaxVisualRange);
                     continue;
                 }
 
@@ -175,7 +175,7 @@ namespace MilitarySimulation.DebugView
 
                 AddPath(platoon.Position, platoon.Waypoints, color);
                 AddWatchArc(platoon.Position, platoon.IsWatching, platoon.WatchBearingDegrees, platoon.WatchArcDegrees,
-                    color, simulation.Rules.MaxVisualRange);
+                    color, platoon.UnitType.MaxVisualRange);
                 AddFriendlyFireLine(simulation, platoon);
             }
         }
@@ -312,7 +312,7 @@ namespace MilitarySimulation.DebugView
                 AddPlatoonMarker(platoon.Position, platoon.FacingDegrees, _truthColor, false);
                 AddPath(platoon.Position, platoon.Waypoints, _truthColor);
                 AddWatchArc(platoon.Position, platoon.IsWatching, platoon.WatchBearingDegrees, platoon.WatchArcDegrees,
-                    _truthColor, simulation.Rules.MaxVisualRange);
+                    _truthColor, platoon.UnitType.MaxVisualRange);
                 AddTruthFireLine(simulation, platoon);
             }
         }

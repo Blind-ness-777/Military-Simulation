@@ -44,22 +44,43 @@ namespace MilitarySimulation.Engine
         public IReadOnlyList<Platoon> Platoons => _platoons;
         public IReadOnlyList<SimEvent> Events => _events;
 
+        /// <summary>
+        /// 부대를 추가한다. 병과를 주지 않으면 역할에 맞는 기본 병과(보병 소대 / 본부)를 새로 만들어 쓴다.
+        /// 인원을 주지 않으면 병과의 기본 인원.
+        /// </summary>
         public Platoon AddPlatoon(
             string name,
             Side side,
             Vec2 position,
             float facingDegrees,
-            int strength = 30,
-            PlatoonRole role = PlatoonRole.Line)
+            int? strength = null,
+            PlatoonRole role = PlatoonRole.Line,
+            UnitType unitType = null)
         {
-            if (strength <= 0) throw new ArgumentOutOfRangeException(nameof(strength));
+            if (unitType == null)
+            {
+                unitType = role == PlatoonRole.Headquarters
+                    ? UnitTypes.CreateHeadquarters()
+                    : UnitTypes.CreateInfantryPlatoon();
+            }
+
+            int initialStrength = strength ?? unitType.DefaultStrength;
+            if (initialStrength <= 0) throw new ArgumentOutOfRangeException(nameof(strength));
             if (role == PlatoonRole.Headquarters && TryGetHeadquarters(side, out _))
             {
                 throw new InvalidOperationException($"{side} 진영에는 이미 본부가 있습니다.");
             }
 
             var platoon = new Platoon(
-                _nextPlatoonId++, name, side, Map.ClampInside(position), facingDegrees, strength, Rules.InitialMorale, role);
+                _nextPlatoonId++,
+                name,
+                side,
+                Map.ClampInside(position),
+                facingDegrees,
+                initialStrength,
+                Rules.InitialMorale,
+                role,
+                unitType);
             _platoons.Add(platoon);
             _platoonsById.Add(platoon.Id, platoon);
             return platoon;
@@ -99,13 +120,14 @@ namespace MilitarySimulation.Engine
         /// </summary>
         public double GetDetectionChancePerTick(Platoon observer, Platoon target)
         {
+            float maxVisualRange = observer.UnitType.MaxVisualRange;
             float distance = Vec2.Distance(observer.Position, target.Position);
-            if (distance > Rules.MaxVisualRange)
+            if (distance > maxVisualRange)
             {
                 return 0.0;
             }
 
-            float rangeFactor = 1f - distance / Rules.MaxVisualRange;
+            float rangeFactor = 1f - distance / maxVisualRange;
             float bearingToTarget = Bearing.Between(observer.Position, target.Position);
             double perMinute = Rules.BaseDetectionPerMinute
                 * rangeFactor
@@ -126,15 +148,16 @@ namespace MilitarySimulation.Engine
         /// </summary>
         public double GetCasualtyChancePerShooterPerTick(Platoon shooter, Platoon target)
         {
+            WeaponProfile weapon = shooter.UnitType.Weapon;
             float distance = Vec2.Distance(shooter.Position, target.Position);
-            if (distance > Rules.FireRange)
+            if (distance > weapon.FireRange)
             {
                 return 0.0;
             }
 
-            float rangeFactor = 1f - distance / Rules.FireRange;
+            float rangeFactor = 1f - distance / weapon.FireRange;
             float bearingToTarget = Bearing.Between(shooter.Position, target.Position);
-            double perMinute = Rules.BaseCasualtyPerShooterPerMinute
+            double perMinute = weapon.CasualtyPerShooterPerMinute
                 * rangeFactor
                 * GetTargetExposure(target)
                 * GetShooterMultiplier(shooter, bearingToTarget);
@@ -142,10 +165,10 @@ namespace MilitarySimulation.Engine
             return PerMinuteToPerTick(perMinute);
         }
 
-        /// <summary>사거리 안이고 시야선이 열려 있는지.</summary>
+        /// <summary>관측자의 관측 거리 안이고 시야선이 열려 있는지(관측자 눈높이 → 표적 높이).</summary>
         public bool CanObserve(Platoon observer, Platoon target)
         {
-            if (Vec2.Distance(observer.Position, target.Position) > Rules.MaxVisualRange)
+            if (Vec2.Distance(observer.Position, target.Position) > observer.UnitType.MaxVisualRange)
             {
                 return false;
             }
@@ -153,9 +176,9 @@ namespace MilitarySimulation.Engine
             return LineOfSight.HasLineOfSight(
                 Map,
                 observer.Position,
-                Rules.EyeHeight,
+                observer.UnitType.EyeHeight,
                 target.Position,
-                Rules.TargetHeight,
+                target.UnitType.TargetHeight,
                 Rules.ForestCanopyHeight);
         }
 
@@ -314,7 +337,7 @@ namespace MilitarySimulation.Engine
                 }
 
                 float distance = Vec2.Distance(shooter.Position, target.Position);
-                float suppressionRangeFactor = Math.Max(0.3f, 1f - distance / Rules.FireRange);
+                float suppressionRangeFactor = Math.Max(0.3f, 1f - distance / shooter.UnitType.Weapon.FireRange);
                 float suppression = shooters * Rules.SuppressionPerShooterPerMinute / 60f * TickSeconds * suppressionRangeFactor;
                 _pendingFire.Add(new PendingFire(target.Id, hits, suppression));
             }
@@ -354,7 +377,8 @@ namespace MilitarySimulation.Engine
                 return null;
             }
 
-            float maxRange = shooter.FirePolicy == FirePolicy.CloseOnly ? Rules.CloseFireRange : Rules.FireRange;
+            WeaponProfile weapon = shooter.UnitType.Weapon;
+            float maxRange = shooter.FirePolicy == FirePolicy.CloseOnly ? weapon.CloseFireRange : weapon.FireRange;
             Platoon best = null;
             float bestDistance = float.MaxValue;
 
@@ -630,27 +654,28 @@ namespace MilitarySimulation.Engine
                 return 0f;
             }
 
+            UnitType unitType = platoon.UnitType;
             float speed;
             switch (platoon.CurrentMoveMode)
             {
                 case MoveMode.Fast:
-                    speed = Rules.FastSpeed;
+                    speed = unitType.FastSpeed;
                     break;
                 case MoveMode.Stealth:
-                    speed = Rules.StealthSpeed;
+                    speed = unitType.StealthSpeed;
                     break;
                 default:
-                    speed = Rules.NormalSpeed;
+                    speed = unitType.NormalSpeed;
                     break;
             }
 
             switch (Map.GetTerrainAt(platoon.Position))
             {
                 case TerrainType.Forest:
-                    speed *= Rules.ForestSpeedMultiplier;
+                    speed *= unitType.ForestSpeedMultiplier;
                     break;
                 case TerrainType.Road:
-                    speed *= Rules.RoadSpeedMultiplier;
+                    speed *= unitType.RoadSpeedMultiplier;
                     break;
             }
 
