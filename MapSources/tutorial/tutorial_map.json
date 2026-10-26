@@ -1,0 +1,9 @@
+{
+  "name": "tutorial",
+  "sizeMeters": 1000,
+  "resolution": 1025,
+  "minHeight": 0.0,
+  "maxHeight": 32.0,
+  "rawFormat": "16-bit unsigned, little-endian (Windows), row 0 = north edge",
+  "source": "Gemini v2 heightmap + watermark removed + east knoll (750,370) 28m"
+}
