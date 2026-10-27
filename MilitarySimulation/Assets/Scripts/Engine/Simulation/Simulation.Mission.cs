@@ -39,14 +39,16 @@ namespace MilitarySimulation.Engine
         }
 
         /// <summary>
-        /// 구역을 이 진영이 확보하고 있는지: 싸울 수 있는(전투 불능·붕괴 아님) 아군이 구역 안에 있고, 싸울 수 있는 적은 없다.
+        /// 구역을 이 진영이 확보하고 있는지: 싸울 수 있는(전투 불능·붕괴 아님) 아군이 구역 안에 있고, 전투 불능이 아닌 적은 없다.
+        /// 사기가 붕괴한 적도 구역 안에 남아 있으면 확보가 아니다(진지에 적이 남아 있는데 "확보"가 뜨지 않게).
+        /// 붕괴한 적은 스스로 물러나므로 영원히 막지는 않는다.
         /// </summary>
         public bool IsZoneHeldBy(Side side, Objective zone)
         {
             bool present = false;
             foreach (Platoon platoon in _platoons)
             {
-                if (platoon.IsDestroyed || platoon.IsBroken || !zone.Contains(platoon.Position))
+                if (platoon.IsDestroyed || !zone.Contains(platoon.Position))
                 {
                     continue;
                 }
@@ -56,7 +58,10 @@ namespace MilitarySimulation.Engine
                     return false;
                 }
 
-                present = true;
+                if (!platoon.IsBroken)
+                {
+                    present = true;
+                }
             }
 
             return present;

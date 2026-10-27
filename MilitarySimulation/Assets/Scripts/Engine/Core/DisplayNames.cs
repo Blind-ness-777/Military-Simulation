@@ -73,5 +73,20 @@ namespace MilitarySimulation.Engine
                     return "진행 중";
             }
         }
+
+        public static string Of(CommanderAction action)
+        {
+            switch (action)
+            {
+                case CommanderAction.Reinforce:
+                    return "증원";
+                case CommanderAction.FallBack:
+                    return "후퇴";
+                case CommanderAction.Counterattack:
+                    return "역습";
+                default:
+                    return "고수";
+            }
+        }
     }
 }

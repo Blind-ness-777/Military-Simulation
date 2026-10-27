@@ -5,10 +5,11 @@ namespace MilitarySimulation.Engine
 {
     /// <summary>
     /// 시뮬레이션 본체. 실제 상태(진실)를 갖고, 고정 1초 틱으로 진행한다.
-    /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
+    /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 지휘관 AI 판단 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
     ///          → 제압·사기 → 접촉 시 행동 → 자체 판단 모드 → 상태 보고 → 임무 판정 → 인원 검산.
     /// 임무 결과가 나면(IsFinished) 더 진행하지 않는다.
-    /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs에 있다(같은 클래스를 파일만 나눔).
+    /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs,
+    /// 지휘관 AI 연결은 Simulation.Commander.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
     public partial class Simulation
     {
@@ -110,6 +111,7 @@ namespace MilitarySimulation.Engine
             UpdateComms();
             DeliverPendingOrders();
             DeliverReports();
+            UpdateCommanders();
             UpdateMovement();
             UpdateDetection();
             UpdateCombat();

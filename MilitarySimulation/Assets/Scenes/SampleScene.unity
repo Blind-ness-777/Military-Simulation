@@ -288,12 +288,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MilitarySimulation.DebugView::MilitarySimulation.DebugView.SimulationController
   _seed: 12345
+  _scenario: 1
   _speedSteps:
   - 2
   - 5
   - 10
   - 20
   _startSpeedIndex: 1
+  _pauseKey: 1
+  _nextPlatoonKey: 3
+  _watchKey: 20
+  _holdKey: 22
+  _truthKey: 34
+  _legendKey: 26
+  _cancelKey: 60
 --- !u!114 &336449116
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -313,6 +321,14 @@ MonoBehaviour:
   _contactColor: {r: 0.95, g: 0.2, b: 0.2, a: 1}
   _truthColor: {r: 1, g: 0.3, b: 1, a: 1}
   _fireColor: {r: 1, g: 0.6, b: 0.1, a: 1}
+  _activeButtonColor: {r: 1, g: 0.85, b: 0.3, a: 1}
+  _pendingOrderColor: {r: 0.85, g: 0.85, b: 0.85, a: 1}
+  _jammingColor: {r: 0.75, g: 0.35, b: 1, a: 1}
+  _commsDegradedColor: {r: 1, g: 0.8, b: 0.1, a: 1}
+  _commsCutColor: {r: 1, g: 0.25, b: 0.2, a: 1}
+  _objectiveColor: {r: 0.3, g: 0.9, b: 1, a: 1}
+  _objectiveDoneColor: {r: 0.35, g: 1, b: 0.45, a: 1}
+  _objectiveFailedColor: {r: 1, g: 0.25, b: 0.2, a: 1}
 --- !u!114 &336449117
 MonoBehaviour:
   m_ObjectHideFlags: 0

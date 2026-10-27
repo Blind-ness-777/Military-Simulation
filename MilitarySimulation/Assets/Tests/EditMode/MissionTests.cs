@@ -46,6 +46,28 @@ namespace MilitarySimulation.Engine.Tests
         }
 
         [Test]
+        public void Seize_BrokenEnemyInsideZone_StillBlocks()
+        {
+            Simulation simulation = CreateSimulation();
+            simulation.AddPlatoon("소대", Side.Blue, new Vec2(250f, 250f), 0f);
+            Platoon enemy = simulation.AddPlatoon("적", Side.Red, new Vec2(260f, 280f), 180f);
+            Mission mission = CreateMission(simulation, out Objective zone);
+            mission.AddStep(zone);
+
+            // 사기 붕괴 상태로 구역 안에 남아 있다(사격을 받지 않아 더 물러나지 않음, 사기 0이라 재집결도 안 함).
+            enemy.IsBroken = true;
+            enemy.Morale = 0f;
+
+            RunTicks(simulation, zone.HoldSeconds + 10);
+            Assert.AreEqual(0, zone.ProgressSeconds);
+            Assert.AreEqual(MissionResult.InProgress, mission.Result);
+
+            Destroy(enemy);
+            RunTicks(simulation, zone.HoldSeconds);
+            Assert.AreEqual(MissionResult.Victory, mission.Result);
+        }
+
+        [Test]
         public void Hold_FailsWhenEnemyHoldsZone()
         {
             Simulation simulation = CreateSimulation();

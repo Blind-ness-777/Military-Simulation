@@ -14,6 +14,15 @@ namespace MilitarySimulation.DebugView
     [RequireComponent(typeof(DebugUnitView))]
     public class SimulationController : MonoBehaviour
     {
+        public enum ScenarioKind
+        {
+            /// <summary>엔진 검증용 기본 시나리오(적은 정해진 명령만 따름).</summary>
+            Test,
+
+            /// <summary>적 지휘관 AI 검증용 방어 시나리오.</summary>
+            Defense
+        }
+
         private const int MaxTicksPerFrame = 50;
         private const int MaxSpeedSteps = 9;
         private const float DefaultWatchArcDegrees = 90f;
@@ -22,6 +31,9 @@ namespace MilitarySimulation.DebugView
         private const float SelectPickRadiusPixels = 24f;
 
         [SerializeField] private int _seed = 12345;
+
+        /// <summary>실행할 시나리오. 방어 시나리오는 적 본부·예비대와 적 지휘관 AI가 있다.</summary>
+        [SerializeField] private ScenarioKind _scenario = ScenarioKind.Test;
 
         /// <summary>
         /// 배속 단계(실제 1초당 게임 시간 초). 숫자키 1부터 순서대로 대응하며 최대 9단계.
@@ -105,7 +117,7 @@ namespace MilitarySimulation.DebugView
             }
 
             _speedIndex = Mathf.Clamp(_startSpeedIndex, 0, SpeedStepCount - 1);
-            _simulation = TestScenario.Create(_seed);
+            _simulation = _scenario == ScenarioKind.Defense ? DefenseScenario.Create(_seed) : TestScenario.Create(_seed);
 
             foreach (Platoon platoon in _simulation.Platoons)
             {
