@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using MilitarySimulation.Engine;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace MilitarySimulation.DebugView
 {
@@ -27,6 +28,8 @@ namespace MilitarySimulation.DebugView
         private const float PanelMargin = 10f;
         private const float RowLabelWidth = 96f;
         private const float StaleReportAlpha = 0.45f;
+        private const float LegendWidth = 300f;
+        private const int LabelPlacementTries = 12;
 
         [SerializeField] private float _markerSize = 18f;
         [SerializeField] private int _logLineCount = 14;
@@ -38,6 +41,8 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _activeButtonColor = new Color(1f, 0.85f, 0.3f);
         [SerializeField] private Color _pendingOrderColor = new Color(0.85f, 0.85f, 0.85f);
         [SerializeField] private Color _jammingColor = new Color(0.75f, 0.35f, 1f);
+        [SerializeField] private Color _commsDegradedColor = new Color(1f, 0.8f, 0.1f);
+        [SerializeField] private Color _commsCutColor = new Color(1f, 0.25f, 0.2f);
 
         /// <summary>
         /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
@@ -51,6 +56,9 @@ namespace MilitarySimulation.DebugView
         private readonly List<int> _lineIndices = new List<int>();
         private readonly List<int> _triangleIndices = new List<int>();
 
+        /// <summary>이번 OnGUI에서 이미 그린 이름표 영역. 겹치면 아래로 밀어 낸다.</summary>
+        private readonly List<Rect> _placedLabels = new List<Rect>();
+
         private SimulationController _controller;
         private Camera _camera;
         private GameObject _meshObject;
@@ -58,6 +66,7 @@ namespace MilitarySimulation.DebugView
         private Material _material;
         private GUIStyle _labelStyle;
         private GUIStyle _panelStyle;
+        private GUIStyle _legendStyle;
 
         public void Initialize(SimulationController controller, Camera targetCamera)
         {
@@ -158,6 +167,7 @@ namespace MilitarySimulation.DebugView
                 if (_controller.TryGetStaleReport(platoon, out FriendlyReport report))
                 {
                     AddReportedPlatoon(report.Snapshot, color, platoon.UnitType.MaxVisualRange);
+                    AddCommsRing(simulation, platoon, report.Snapshot.Position);
                     continue;
                 }
 
@@ -177,6 +187,33 @@ namespace MilitarySimulation.DebugView
                 AddWatchArc(platoon.Position, platoon.IsWatching, platoon.WatchBearingDegrees, platoon.WatchArcDegrees,
                     color, platoon.UnitType.MaxVisualRange);
                 AddFriendlyFireLine(simulation, platoon);
+                AddCommsRing(simulation, platoon, platoon.Position);
+            }
+        }
+
+        /// <summary>
+        /// 통신 상태 링: 저하는 노란 점선, 두절은 빨간 실선 두 겹. 정상·직접은 링이 없다.
+        /// 통신 상태는 본부가 직접 아는 것이라(무전이 닿는지) 실제 값을 그대로 쓴다.
+        /// </summary>
+        private void AddCommsRing(Simulation simulation, Platoon platoon, Vec2 position)
+        {
+            if (platoon.IsHeadquarters || platoon.IsDestroyed || !simulation.TryGetHeadquarters(platoon.Side, out _))
+            {
+                return;
+            }
+
+            Vector3 center = WorldMapping.ToWorld(position, MarkerHeight);
+            float radius = _markerSize * 0.8f;
+            switch (platoon.Comms)
+            {
+                case CommsState.Degraded:
+                    AddDashedCircle(center, radius, _commsDegradedColor, 24);
+                    AddDashedCircle(center, radius + 1.5f, _commsDegradedColor, 24);
+                    break;
+                case CommsState.Cut:
+                    AddCircleOutline(center, radius, _commsCutColor, 24);
+                    AddCircleOutline(center, radius + 1.5f, _commsCutColor, 24);
+                    break;
             }
         }
 
@@ -186,9 +223,11 @@ namespace MilitarySimulation.DebugView
         /// </summary>
         private void AddReportedPlatoon(PlatoonSnapshot snapshot, Color color, float visualRange)
         {
+            // 실시간 위치(채운 원)와 한눈에 구분되도록 점선 원으로 그린다.
             Color ghost = WithAlpha(color, snapshot.IsDestroyed ? 0.2f : StaleReportAlpha);
-            AddPlatoonMarker(snapshot.Position, snapshot.FacingDegrees, ghost, false);
-            AddCircleOutline(WorldMapping.ToWorld(snapshot.Position, MarkerHeight), _markerSize * 0.3f, ghost, CircleSegments);
+            Vector3 center = WorldMapping.ToWorld(snapshot.Position, MarkerHeight);
+            AddDashedCircle(center, _markerSize * 0.5f, ghost, 20);
+            AddLine(center, center + WorldMapping.BearingToWorldDirection(snapshot.FacingDegrees) * _markerSize * 1.5f, ghost);
             AddPath(snapshot.Position, snapshot.Waypoints, ghost);
             AddWatchArc(snapshot.Position, snapshot.IsWatching, snapshot.WatchBearingDegrees, snapshot.WatchArcDegrees,
                 ghost, visualRange);
@@ -462,6 +501,18 @@ namespace MilitarySimulation.DebugView
             }
         }
 
+        /// <summary>원 둘레를 한 칸씩 건너뛰어 그린 점선 원.</summary>
+        private void AddDashedCircle(Vector3 center, float radius, Color color, int segments)
+        {
+            for (int i = 0; i < segments; i += 2)
+            {
+                AddLine(
+                    center + GetCircleOffset(i, radius, segments),
+                    center + GetCircleOffset(i + 1, radius, segments),
+                    color);
+            }
+        }
+
         private void AddDashedLine(Vec2 from, Vec2 to, Color color)
         {
             const float dash = 10f;
@@ -533,6 +584,10 @@ namespace MilitarySimulation.DebugView
             DrawStatusPanel(simulation);
             DrawLogPanel(simulation);
             DrawCommandPanel();
+            if (_controller.ShowLegend)
+            {
+                DrawLegend();
+            }
         }
 
         private void DrawCommandPanel()
@@ -585,7 +640,7 @@ namespace MilitarySimulation.DebugView
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("명령", GUILayout.Width(RowLabelWidth));
-            if (CommandButton("경계 방향 지정", _controller.IsTargetingWatch))
+            if (CommandButton($"경계 [{KeyName(_controller.WatchKey)}]", _controller.IsTargetingWatch))
             {
                 if (_controller.IsTargetingWatch)
                 {
@@ -597,7 +652,7 @@ namespace MilitarySimulation.DebugView
                 }
             }
 
-            if (CommandButton("정지", false))
+            if (CommandButton($"정지 [{KeyName(_controller.HoldKey)}]", false))
             {
                 _controller.HoldSelected();
             }
@@ -667,7 +722,7 @@ namespace MilitarySimulation.DebugView
 
             if (_controller.IsTargetingWatch)
             {
-                return "지도를 좌클릭해 경계 방향 지정 (우클릭·Esc 취소)";
+                return $"지도를 좌클릭해 경계 방향 지정 (우클릭·{KeyName(_controller.CancelKey)} 취소)";
             }
 
             if (selected.Comms == CommsState.Cut)
@@ -675,7 +730,7 @@ namespace MilitarySimulation.DebugView
                 return $"{selected.Name}: 통신 두절 — 명령은 회복될 때까지 보류됨";
             }
 
-            return "이동 방식·접촉 시는 다음 이동 명령에, 사격 방침은 바로 발신";
+            return $"{KeyName(_controller.WatchKey)}: 커서 방향 경계 · 이동 방식·접촉 시는 다음 이동 명령에";
         }
 
         /// <summary>
@@ -745,10 +800,12 @@ namespace MilitarySimulation.DebugView
             _labelStyle.normal.textColor = Color.white;
             _panelStyle = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 13, wordWrap = false };
             _panelStyle.normal.textColor = Color.white;
+            _legendStyle = new GUIStyle(_panelStyle) { richText = true, fontSize = 12 };
         }
 
         private void DrawLabels(Simulation simulation)
         {
+            _placedLabels.Clear();
             foreach (Platoon platoon in simulation.Platoons)
             {
                 bool isFriendly = platoon.Side == _controller.PlayerSide;
@@ -808,8 +865,38 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, 340f, 80f);
-            GUI.Label(rect, text, _labelStyle);
+            var content = new GUIContent(text);
+            Vector2 size = _labelStyle.CalcSize(content);
+            var rect = new Rect(screen.x + 12f, Screen.height - screen.y - 10f, size.x, size.y);
+            PlaceWithoutOverlap(ref rect);
+            GUI.Label(rect, content, _labelStyle);
+        }
+
+        /// <summary>
+        /// 이미 그린 이름표와 겹치면 겹친 만큼 아래로 내린다. 몇 번 시도해도 자리가 없으면 그 자리에 그린다.
+        /// 부대가 가까이 붙으면 이름표가 서로 덮여 읽을 수 없던 문제 때문이다.
+        /// </summary>
+        private void PlaceWithoutOverlap(ref Rect rect)
+        {
+            for (int attempt = 0; attempt < LabelPlacementTries; attempt++)
+            {
+                bool moved = false;
+                foreach (Rect placed in _placedLabels)
+                {
+                    if (placed.Overlaps(rect))
+                    {
+                        rect.y = placed.yMax + 2f;
+                        moved = true;
+                    }
+                }
+
+                if (!moved)
+                {
+                    break;
+                }
+            }
+
+            _placedLabels.Add(rect);
         }
 
         private void DrawStatusPanel(Simulation simulation)
@@ -827,10 +914,14 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine(GetCursorText(simulation));
             _textBuilder.AppendLine();
             _textBuilder.AppendLine("좌클릭 소대 선택 · 우클릭 이동 (Shift 경로 추가)");
-            _textBuilder.AppendLine($"Space 일시정지 · 1~{_controller.SpeedStepCount} 배속 · Tab 다음 소대");
-            _textBuilder.AppendLine("H 정지 · T 실제 전황 · Esc 취소");
+            _textBuilder.AppendLine(
+                $"{KeyName(_controller.PauseKey)} 일시정지 · 1~{_controller.SpeedStepCount} 배속 · {KeyName(_controller.NextPlatoonKey)} 다음 소대");
+            _textBuilder.AppendLine(
+                $"{KeyName(_controller.WatchKey)} 커서 방향 경계 · {KeyName(_controller.HoldKey)} 정지 · {KeyName(_controller.TruthKey)} 실제 전황");
+            _textBuilder.AppendLine(
+                $"{KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.CancelKey)} 취소");
 
-            var rect = new Rect(PanelMargin, PanelMargin, 430f, _controller.IsSpectating ? 178f : 160f);
+            var rect = new Rect(PanelMargin, PanelMargin, 430f, _controller.IsSpectating ? 196f : 178f);
             _uiRects.Add(rect);
             GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
         }
@@ -864,6 +955,55 @@ namespace MilitarySimulation.DebugView
             var rect = new Rect(PanelMargin, Screen.height - height - PanelMargin, width, height);
             _uiRects.Add(rect);
             GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
+        }
+
+        /// <summary>
+        /// 화면 기호 설명. 색은 Inspector의 색 설정을 그대로 읽어서, 색을 바꿔도 범례가 맞는다.
+        /// </summary>
+        private void DrawLegend()
+        {
+            _textBuilder.Clear();
+            _textBuilder.AppendLine("<b>범례</b>");
+            _textBuilder.AppendLine($"{Swatch(_friendlyColor, "●")} 아군 (실시간 위치)");
+            _textBuilder.AppendLine($"{Swatch(_friendlyColor, "○")} 아군 마지막 보고 위치 (점선 원)");
+            _textBuilder.AppendLine($"{Swatch(_friendlyColor, "□")} 본부");
+            _textBuilder.AppendLine($"{Swatch(_selectedColor, "●")} 선택한 소대");
+            _textBuilder.AppendLine($"{Swatch(_commsDegradedColor, "○")} 통신 저하 (점선 링, 보고·명령 늦음)");
+            _textBuilder.AppendLine($"{Swatch(_commsCutColor, "○")} 통신 두절 (실선 링, 보류)");
+            _textBuilder.AppendLine($"{Swatch(_contactColor, "■")} 적 접촉 (확인)");
+            _textBuilder.AppendLine($"{Swatch(_contactColor, "□")} 적 접촉 (소실, 점점 흐려짐)");
+            _textBuilder.AppendLine($"{Swatch(_fireColor, "—")} 사격");
+            _textBuilder.AppendLine($"{Swatch(_pendingOrderColor, "- -")} 도착 전 명령");
+            _textBuilder.Append($"{Swatch(_jammingColor, "○")} 재밍 구역");
+            if (_controller.ShowTruth)
+            {
+                _textBuilder.Append($"\n{Swatch(_truthColor, "○")} 실제 위치 (디버그)");
+            }
+
+            var content = new GUIContent(_textBuilder.ToString());
+            float height = _legendStyle.CalcHeight(content, LegendWidth);
+            var rect = new Rect(Screen.width - LegendWidth - PanelMargin, PanelMargin, LegendWidth, height);
+            _uiRects.Add(rect);
+            GUI.Box(rect, content, _legendStyle);
+        }
+
+        private static string Swatch(Color color, string symbol)
+        {
+            return $"<color=#{ColorUtility.ToHtmlStringRGB(color)}><b>{symbol}</b></color>";
+        }
+
+        /// <summary>패널에 보여줄 키 이름. Escape처럼 긴 이름은 흔히 쓰는 짧은 이름으로.</summary>
+        private static string KeyName(Key key)
+        {
+            switch (key)
+            {
+                case Key.Escape:
+                    return "Esc";
+                case Key.Space:
+                    return "Space";
+                default:
+                    return key.ToString();
+            }
         }
 
         private static string GetStateText(Platoon platoon)
