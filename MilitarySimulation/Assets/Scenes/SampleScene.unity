@@ -298,7 +298,7 @@ MonoBehaviour:
   _pauseKey: 1
   _nextPlatoonKey: 3
   _watchKey: 20
-  _holdKey: 22
+  _holdKey: 32
   _truthKey: 34
   _legendKey: 26
   _cancelKey: 60

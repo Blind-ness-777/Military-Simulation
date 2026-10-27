@@ -5,11 +5,11 @@ namespace MilitarySimulation.Engine
 {
     /// <summary>
     /// 시뮬레이션 본체. 실제 상태(진실)를 갖고, 고정 1초 틱으로 진행한다.
-    /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 지휘관 AI 판단 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
+    /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 지휘관 AI 판단 → 대기 해제 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
     ///          → 제압·사기 → 접촉 시 행동 → 자체 판단 모드 → 상태 보고 → 임무 판정 → 인원 검산.
     /// 임무 결과가 나면(IsFinished) 더 진행하지 않는다.
     /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs,
-    /// 지휘관 AI 연결은 Simulation.Commander.cs에 있다(같은 클래스를 파일만 나눔).
+    /// 지휘관 AI 연결은 Simulation.Commander.cs, 계획 명령(대기·신호·H시)은 Simulation.Plans.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
     public partial class Simulation
     {
@@ -112,6 +112,7 @@ namespace MilitarySimulation.Engine
             DeliverPendingOrders();
             DeliverReports();
             UpdateCommanders();
+            UpdateWaits();
             UpdateMovement();
             UpdateDetection();
             UpdateCombat();
@@ -216,11 +217,24 @@ namespace MilitarySimulation.Engine
                     {
                         platoon.Position = target;
                         remaining -= distance;
+                        Waypoint reached = platoon.Waypoints[0];
                         platoon.RemoveReachedWaypoint();
 
-                        if (!platoon.IsMoving)
+                        if (reached.HasWait)
                         {
-                            Report(platoon, $"{platoon.Name} {Map.GetGridReference(target)} 도착");
+                            // 대기 지점: 멈춰 서서 조건을 기다린다(UpdateWaits). 도착도 계획 사건이다.
+                            platoon.BeginWait(reached);
+                            Report(platoon,
+                                $"{platoon.Name} {Map.GetGridReference(target)} 대기 — {DisplayNames.Of(reached.Wait)}",
+                                PlanEventKind.Arrival);
+                        }
+                        else
+                        {
+                            ApplyFirePolicyOnArrival(platoon, reached);
+                            if (!platoon.IsMoving)
+                            {
+                                Report(platoon, $"{platoon.Name} {Map.GetGridReference(target)} 도착", PlanEventKind.Arrival);
+                            }
                         }
                     }
                     else
@@ -432,7 +446,7 @@ namespace MilitarySimulation.Engine
                 ? $"접촉 {contact.ContactNumber}"
                 : "적";
             float distance = Vec2.Distance(shooter.Position, newTarget.Position);
-            Report(shooter, $"{shooter.Name} 사격 개시 → {targetName} (약 {RoundDistance(distance)}m)");
+            Report(shooter, $"{shooter.Name} 사격 개시 → {targetName} (약 {RoundDistance(distance)}m)", PlanEventKind.Contact);
         }
 
         private int ApplyCasualties(Platoon target, int hits)
@@ -464,7 +478,8 @@ namespace MilitarySimulation.Engine
             target.Morale = Math.Max(0f, target.Morale - casualties * Rules.MoraleLossPerCasualty);
 
             Report(target,
-                $"{target.Name} 피해: 전사 {killed}, 부상 {wounded} (전투 가능 {target.Effective}/{target.InitialStrength})");
+                $"{target.Name} 피해: 전사 {killed}, 부상 {wounded} (전투 가능 {target.Effective}/{target.InitialStrength})",
+                PlanEventKind.Contact);
 
             if (target.IsDestroyed)
             {

@@ -41,6 +41,9 @@ namespace MilitarySimulation.Engine
         // Event
         public string Text { get; set; }
 
+        /// <summary>이 보고가 본부에 알리는 계획 사건(○소대 접촉/도착). 도착하면 그 사건을 기다리는 소대에 통지가 나간다.</summary>
+        public PlanEventKind PlanEvent { get; set; }
+
         // Sighting
         public int TargetId { get; set; }
         public Vec2 TargetPosition { get; set; }

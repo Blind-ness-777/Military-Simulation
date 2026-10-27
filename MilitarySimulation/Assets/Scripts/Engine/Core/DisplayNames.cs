@@ -74,6 +74,38 @@ namespace MilitarySimulation.Engine
             }
         }
 
+        /// <summary>대기 조건 요약. 예: "신호 1 또는 H시", "1소대 접촉".</summary>
+        public static string Of(WaitCondition wait)
+        {
+            if (wait == null)
+            {
+                return "대기 없음";
+            }
+
+            var parts = new System.Collections.Generic.List<string>(4);
+            if (wait.Signal > 0)
+            {
+                parts.Add($"신호 {wait.Signal}");
+            }
+
+            if (wait.AtHHour)
+            {
+                parts.Add("H시");
+            }
+
+            if (wait.ContactPlatoon != null)
+            {
+                parts.Add($"{wait.ContactPlatoon.Name} 접촉");
+            }
+
+            if (wait.ArrivalPlatoon != null)
+            {
+                parts.Add($"{wait.ArrivalPlatoon.Name} 도착");
+            }
+
+            return string.Join(" 또는 ", parts);
+        }
+
         public static string Of(CommanderAction action)
         {
             switch (action)

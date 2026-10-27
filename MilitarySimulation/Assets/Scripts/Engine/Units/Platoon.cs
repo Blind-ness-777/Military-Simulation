@@ -10,6 +10,9 @@ namespace MilitarySimulation.Engine
     {
         private readonly List<Waypoint> _waypoints = new List<Waypoint>();
         private readonly List<Vec2> _trail = new List<Vec2>();
+        private readonly HashSet<int> _receivedSignals = new HashSet<int>();
+        private readonly HashSet<int> _knownContacts = new HashSet<int>();
+        private readonly HashSet<int> _knownArrivals = new HashSet<int>();
 
         internal Platoon(
             int id,
@@ -51,7 +54,23 @@ namespace MilitarySimulation.Engine
         public float FacingDegrees { get; internal set; }
 
         public IReadOnlyList<Waypoint> Waypoints => _waypoints;
-        public bool IsMoving => _waypoints.Count > 0;
+
+        /// <summary>남은 경로가 있고 대기 중이 아닌지. 대기 지점에서 조건을 기다리는 동안은 정지로 판정한다.</summary>
+        public bool IsMoving => _waypoints.Count > 0 && ActiveWait == null;
+
+        /// <summary>대기 지점에서 기다리는 조건. null이면 대기 중이 아니다. 남은 경로(Waypoints)는 대기가 풀린 뒤 이어서 간다.</summary>
+        public WaitCondition ActiveWait { get; private set; }
+
+        public bool IsWaiting => ActiveWait != null;
+
+        /// <summary>지금 대기가 풀리면 바꿀 사격 방침(대기 지점 웨이포인트의 속성).</summary>
+        internal FirePolicy? FirePolicyOnRelease { get; private set; }
+
+        /// <summary>
+        /// 이 소대가 알고 있는 H시(경과 초). H시 지정·변경은 통신을 타므로, 두절된 소대는 예전 값을 갖고 있을 수 있다.
+        /// 새 계획을 받아도 지워지지 않는다(작전 시각은 계획과 따로 맞춰 둔 것).
+        /// </summary>
+        public int? KnownHHourSeconds { get; internal set; }
 
         /// <summary>현재 구간의 이동 방식. 이동 중이 아니면 의미가 없다.</summary>
         public MoveMode CurrentMoveMode => IsMoving ? _waypoints[0].MoveMode : MoveMode.Normal;
@@ -158,6 +177,11 @@ namespace MilitarySimulation.Engine
 
         internal void SetPath(IEnumerable<Waypoint> waypoints, bool append)
         {
+            if (!append)
+            {
+                ClearPlan();
+            }
+
             if (!append || _waypoints.Count == 0)
             {
                 _waypoints.Clear();
@@ -170,6 +194,7 @@ namespace MilitarySimulation.Engine
 
         internal void SetWatch(float bearingDegrees, float arcDegrees)
         {
+            ClearPlan();
             _waypoints.Clear();
             IsWatching = true;
             WatchBearingDegrees = Bearing.Normalize(bearingDegrees);
@@ -179,6 +204,7 @@ namespace MilitarySimulation.Engine
 
         internal void Hold()
         {
+            ClearPlan();
             _waypoints.Clear();
             IsWatching = false;
         }
@@ -187,6 +213,44 @@ namespace MilitarySimulation.Engine
         {
             SegmentStart = _waypoints[0].Position;
             _waypoints.RemoveAt(0);
+        }
+
+        /// <summary>대기 지점에 도착해 대기를 시작한다. 남은 경로는 그대로 두고, 대기가 풀리면 이어서 간다.</summary>
+        internal void BeginWait(Waypoint reached)
+        {
+            ActiveWait = reached.Wait;
+            FirePolicyOnRelease = reached.FirePolicyOnRelease;
+        }
+
+        internal void EndWait()
+        {
+            ActiveWait = null;
+            FirePolicyOnRelease = null;
+        }
+
+        internal void ReceiveSignal(int number) => _receivedSignals.Add(number);
+        internal bool HasSignal(int number) => _receivedSignals.Contains(number);
+        internal void ConsumeSignal(int number) => _receivedSignals.Remove(number);
+
+        internal void LearnPlanEvent(int subjectId, PlanEventKind kind) => GetKnownEvents(kind).Add(subjectId);
+        internal bool KnowsPlanEvent(int subjectId, PlanEventKind kind) => GetKnownEvents(kind).Contains(subjectId);
+        internal void ConsumePlanEvent(int subjectId, PlanEventKind kind) => GetKnownEvents(kind).Remove(subjectId);
+
+        private HashSet<int> GetKnownEvents(PlanEventKind kind)
+        {
+            return kind == PlanEventKind.Arrival ? _knownArrivals : _knownContacts;
+        }
+
+        /// <summary>
+        /// 새 명령(새 경로·경계·정지)을 받으면 대기와 이전 계획에서 받은 신호·통지를 잊는다.
+        /// "신호는 계획을 받은 뒤에 온 것만 유효"하게 해서, 예전 신호에 새 계획이 바로 풀려 버리지 않게 한다.
+        /// </summary>
+        private void ClearPlan()
+        {
+            EndWait();
+            _receivedSignals.Clear();
+            _knownContacts.Clear();
+            _knownArrivals.Clear();
         }
     }
 }

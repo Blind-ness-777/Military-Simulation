@@ -77,6 +77,37 @@ namespace MilitarySimulation.Engine
             SubmitOrder(new PendingOrder(platoon, OrderKind.Move, description) { Waypoints = waypoints, Append = append });
         }
 
+        /// <summary>
+        /// 웨이포인트 속성(이동 방식·접촉 시 행동·대기 조건·해제 시 사격 방침)을 지점마다 따로 지정하는 이동 명령(계획 명령).
+        /// </summary>
+        public void OrderMove(Platoon platoon, IReadOnlyList<Waypoint> waypoints, bool append)
+        {
+            if (waypoints == null || waypoints.Count == 0)
+            {
+                return;
+            }
+
+            var clamped = new List<Waypoint>(waypoints.Count);
+            int waits = 0;
+            foreach (Waypoint waypoint in waypoints)
+            {
+                clamped.Add(waypoint.WithPosition(Map.ClampInside(waypoint.Position)));
+                if (waypoint.HasWait)
+                {
+                    waits++;
+                }
+            }
+
+            Waypoint first = clamped[0];
+            Vec2 destination = clamped[clamped.Count - 1].Position;
+            string verb = append ? "경로 추가" : "이동";
+            string waitText = waits > 0 ? $", 대기 {waits}곳" : string.Empty;
+            string description =
+                $"{platoon.Name} {verb} → {Map.GetGridReference(destination)} ({DisplayNames.Of(first.MoveMode)}, 접촉 시 {DisplayNames.Of(first.ContactBehavior)}{waitText})";
+
+            SubmitOrder(new PendingOrder(platoon, OrderKind.Move, description) { Waypoints = clamped, Append = append });
+        }
+
         public void OrderWatch(Platoon platoon, float bearingDegrees, float arcDegrees)
         {
             float bearing = Bearing.Normalize(bearingDegrees);
@@ -117,7 +148,11 @@ namespace MilitarySimulation.Engine
                 }
 
                 ApplyOrder(order);
-                Log(platoon.Side, $"명령: {order.Description}");
+                if (order.LogOnSubmit)
+                {
+                    Log(platoon.Side, $"명령: {order.Description}");
+                }
+
                 return;
             }
 
@@ -137,6 +172,11 @@ namespace MilitarySimulation.Engine
 
             // 목록 순서가 곧 적용 순서다. 같은 시각에 도착하면 먼저 발신한 명령이 먼저 적용된다.
             _pendingOrders.Add(order);
+
+            if (!order.LogOnSubmit)
+            {
+                return;
+            }
 
             string arrival = order.IsWaitingForComms
                 ? "통신 두절 — 회복되면 전달"
@@ -183,10 +223,19 @@ namespace MilitarySimulation.Engine
                 case OrderKind.FirePolicy:
                     platoon.FirePolicy = order.FirePolicy;
                     break;
+                case OrderKind.Signal:
+                    platoon.ReceiveSignal(order.SignalNumber);
+                    break;
+                case OrderKind.HHour:
+                    platoon.KnownHHourSeconds = order.HHourSeconds;
+                    break;
+                case OrderKind.PlanNotice:
+                    platoon.LearnPlanEvent(order.NoticeSubject.Id, order.NoticeKind);
+                    break;
             }
 
-            // 플레이어 명령을 받으면 자체 판단을 멈추고 지휘를 따른다.
-            if (platoon.IsSelfDirected && order.Kind != OrderKind.FirePolicy)
+            // 플레이어 명령을 받으면 자체 판단을 멈추고 지휘를 따른다(신호·H시·통지는 정보라서 제외).
+            if (platoon.IsSelfDirected && IsMovementOrder(order.Kind))
             {
                 platoon.IsSelfDirected = false;
                 platoon.SelfDirectedStage = 0;
@@ -214,14 +263,42 @@ namespace MilitarySimulation.Engine
         }
 
         /// <summary>
-        /// 새 명령이 대신하는 대기 명령만 지운다. 이동·경계·정지는 서로 대신하고, 사격 방침은 사격 방침만 대신한다.
-        /// (사격 방침을 바꿨다고 이동 명령이 취소되면 안 된다.)
+        /// 새 명령이 대신하는 대기 명령만 지운다. 이동·경계·정지는 서로 대신하고, 사격 방침은 사격 방침만, H시는 H시만 대신한다.
+        /// (사격 방침을 바꿨다고 이동 명령이 취소되면 안 된다.) 신호와 통지는 무엇도 대신하지 않고, 무엇에도 지워지지 않는다.
         /// </summary>
         private void RemoveConflictingPendingOrders(PendingOrder newOrder)
         {
-            bool newIsFirePolicy = newOrder.Kind == OrderKind.FirePolicy;
+            int group = GetReplaceGroup(newOrder.Kind);
+            if (group < 0)
+            {
+                return;
+            }
+
             _pendingOrders.RemoveAll(pending =>
-                pending.Platoon == newOrder.Platoon && (pending.Kind == OrderKind.FirePolicy) == newIsFirePolicy);
+                pending.Platoon == newOrder.Platoon && GetReplaceGroup(pending.Kind) == group);
+        }
+
+        /// <summary>서로 대신하는 명령 묶음. -1이면 대신하지도 지워지지도 않는다.</summary>
+        private static int GetReplaceGroup(OrderKind kind)
+        {
+            switch (kind)
+            {
+                case OrderKind.Move:
+                case OrderKind.Watch:
+                case OrderKind.Hold:
+                    return 0;
+                case OrderKind.FirePolicy:
+                    return 1;
+                case OrderKind.HHour:
+                    return 2;
+                default:
+                    return -1;
+            }
+        }
+
+        private static bool IsMovementOrder(OrderKind kind)
+        {
+            return GetReplaceGroup(kind) == 0;
         }
 
         /// <summary>이 부대에 대기 중인 명령 중 가장 늦은 도착 시각. 없으면 0.</summary>
@@ -266,7 +343,10 @@ namespace MilitarySimulation.Engine
                 }
 
                 ApplyOrder(order);
-                Report(platoon, $"명령 수신: {order.Description}");
+                if (order.LogOnDelivery)
+                {
+                    Report(platoon, $"명령 수신: {order.Description}");
+                }
             }
         }
 
