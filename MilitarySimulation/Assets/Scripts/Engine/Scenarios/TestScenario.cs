@@ -55,7 +55,8 @@ namespace MilitarySimulation.Engine
             return simulation;
         }
 
-        private static MapData CreateMap()
+        /// <summary>DefenseScenario도 같은 지도를 쓴다(시야 조건을 이미 확인한 지도라서).</summary>
+        internal static MapData CreateMap()
         {
             var map = new MapData(MapCells, MapCells, CellSize);
 
