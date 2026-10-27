@@ -30,6 +30,16 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private float[] _speedSteps = { 2f, 5f, 10f, 20f };
         [SerializeField] private int _startSpeedIndex = 1;
 
+        // 단축키. 키는 여기 한곳에서만 정한다(패널·도움말 표시도 이 값을 읽는다).
+        // 배속은 숫자키 1~9 고정. 플레이어가 게임 안에서 바꾸는 키 설정은 설정 메뉴가 생길 때 입력 액션으로 옮긴다.
+        [SerializeField] private Key _pauseKey = Key.Space;
+        [SerializeField] private Key _nextPlatoonKey = Key.Tab;
+        [SerializeField] private Key _watchKey = Key.F;
+        [SerializeField] private Key _holdKey = Key.H;
+        [SerializeField] private Key _truthKey = Key.T;
+        [SerializeField] private Key _legendKey = Key.L;
+        [SerializeField] private Key _cancelKey = Key.Escape;
+
         private readonly List<Platoon> _friendlyPlatoons = new List<Platoon>();
         private Simulation _simulation;
         private DebugMapView _mapView;
@@ -54,6 +64,17 @@ namespace MilitarySimulation.DebugView
 
         /// <summary>true면 실제 전황(적 위치)까지 표시한다. 디버그 전용.</summary>
         public bool ShowTruth { get; private set; }
+
+        /// <summary>화면 기호 설명(범례) 표시 여부.</summary>
+        public bool ShowLegend { get; private set; } = true;
+
+        public Key PauseKey => _pauseKey;
+        public Key NextPlatoonKey => _nextPlatoonKey;
+        public Key WatchKey => _watchKey;
+        public Key HoldKey => _holdKey;
+        public Key TruthKey => _truthKey;
+        public Key LegendKey => _legendKey;
+        public Key CancelKey => _cancelKey;
 
         /// <summary>경계 버튼을 누른 뒤, 지도에서 방향을 찍기를 기다리는 중인지.</summary>
         public bool IsTargetingWatch { get; private set; }
@@ -197,6 +218,28 @@ namespace MilitarySimulation.DebugView
             IsTargetingWatch = false;
         }
 
+        /// <summary>
+        /// 선택한 소대가 지금 마우스 커서 방향을 경계한다(클릭 단계 없음).
+        /// 방향은 플레이어가 보는 소대 위치 기준(보고가 끊긴 소대는 마지막 보고 위치).
+        /// </summary>
+        public void WatchTowardCursor()
+        {
+            Platoon selected = SelectedPlatoon;
+            if (IsSpectating || selected == null || !HasCursorMapPosition)
+            {
+                return;
+            }
+
+            Vec2 origin = GetKnownPosition(selected);
+            if (Vec2.Distance(origin, CursorMapPosition) < 1f)
+            {
+                return;
+            }
+
+            IsTargetingWatch = false;
+            _simulation.OrderWatch(selected, Bearing.Between(origin, CursorMapPosition), DefaultWatchArcDegrees);
+        }
+
         public void HoldSelected()
         {
             Platoon selected = SelectedPlatoon;
@@ -215,7 +258,7 @@ namespace MilitarySimulation.DebugView
                 return;
             }
 
-            if (keyboard.spaceKey.wasPressedThisFrame)
+            if (keyboard[_pauseKey].wasPressedThisFrame)
             {
                 IsPaused = !IsPaused;
             }
@@ -229,24 +272,34 @@ namespace MilitarySimulation.DebugView
                 }
             }
 
-            if (keyboard.tabKey.wasPressedThisFrame && _friendlyPlatoons.Count > 0)
+            if (keyboard[_nextPlatoonKey].wasPressedThisFrame && _friendlyPlatoons.Count > 0)
             {
                 SelectPlatoon(_friendlyPlatoons[(_selectedIndex + 1) % _friendlyPlatoons.Count]);
             }
 
-            if (keyboard.tKey.wasPressedThisFrame)
+            if (keyboard[_truthKey].wasPressedThisFrame)
             {
                 ShowTruth = !ShowTruth;
             }
 
-            if (keyboard.escapeKey.wasPressedThisFrame)
+            if (keyboard[_legendKey].wasPressedThisFrame)
+            {
+                ShowLegend = !ShowLegend;
+            }
+
+            if (keyboard[_cancelKey].wasPressedThisFrame)
             {
                 CancelWatchTargeting();
             }
 
-            if (keyboard.hKey.wasPressedThisFrame)
+            if (keyboard[_holdKey].wasPressedThisFrame)
             {
                 HoldSelected();
+            }
+
+            if (keyboard[_watchKey].wasPressedThisFrame)
+            {
+                WatchTowardCursor();
             }
         }
 
