@@ -48,6 +48,7 @@ namespace MilitarySimulation.DebugView
         private float _tickAccumulator;
         private int _speedIndex;
         private int _selectedIndex;
+        private bool _missionEndHandled;
 
         public Simulation Simulation => _simulation;
         public Side PlayerSide => Side.Blue;
@@ -134,6 +135,7 @@ namespace MilitarySimulation.DebugView
             HandleMouse();
             AdvanceSimulation();
             CheckSpectateMode();
+            CheckMissionEnd();
             _unitView.Refresh();
         }
 
@@ -169,6 +171,19 @@ namespace MilitarySimulation.DebugView
             IsTargetingWatch = false;
             ShowTruth = true;
             _speedIndex = SpeedStepCount - 1;
+        }
+
+        /// <summary>판이 끝나면 실제 전황을 한 번 켜서, 내가 본 것과 실제를 비교할 수 있게 한다(AAR 전 임시).</summary>
+        private void CheckMissionEnd()
+        {
+            if (_missionEndHandled || !_simulation.IsFinished)
+            {
+                return;
+            }
+
+            _missionEndHandled = true;
+            IsTargetingWatch = false;
+            ShowTruth = true;
         }
 
         public void SelectPlatoon(Platoon platoon)

@@ -43,6 +43,9 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _jammingColor = new Color(0.75f, 0.35f, 1f);
         [SerializeField] private Color _commsDegradedColor = new Color(1f, 0.8f, 0.1f);
         [SerializeField] private Color _commsCutColor = new Color(1f, 0.25f, 0.2f);
+        [SerializeField] private Color _objectiveColor = new Color(0.3f, 0.9f, 1f);
+        [SerializeField] private Color _objectiveDoneColor = new Color(0.35f, 1f, 0.45f);
+        [SerializeField] private Color _objectiveFailedColor = new Color(1f, 0.25f, 0.2f);
 
         /// <summary>
         /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
@@ -67,6 +70,7 @@ namespace MilitarySimulation.DebugView
         private GUIStyle _labelStyle;
         private GUIStyle _panelStyle;
         private GUIStyle _legendStyle;
+        private GUIStyle _bannerStyle;
 
         public void Initialize(SimulationController controller, Camera targetCamera)
         {
@@ -90,6 +94,7 @@ namespace MilitarySimulation.DebugView
 
             Simulation simulation = _controller.Simulation;
             AddJammingZones(simulation);
+            AddObjectives(simulation);
             AddFriendlyPlatoons(simulation);
             AddPendingMoveOrders(simulation);
             AddContacts(simulation);
@@ -269,6 +274,69 @@ namespace MilitarySimulation.DebugView
                     AddSquareOutline(WorldMapping.ToWorld(waypoint.Position, MarkerHeight), 3f, color);
                     previous = waypoint.Position;
                 }
+            }
+        }
+
+        /// <summary>
+        /// 플레이어 진영의 임무 목표 구역. 확보 = 실선 원, 방어 = 두 겹 원, 폭파 = 원 + X, 철수 = 점선 원.
+        /// 색: 진행 중 하늘색, 아직 차례가 아님 흐리게, 달성 초록, 실패 빨강.
+        /// </summary>
+        private void AddObjectives(Simulation simulation)
+        {
+            if (!simulation.TryGetMission(_controller.PlayerSide, out Mission mission))
+            {
+                return;
+            }
+
+            foreach (Objective objective in mission.Steps)
+            {
+                AddObjective(objective);
+            }
+
+            foreach (Objective objective in mission.Constraints)
+            {
+                AddObjective(objective);
+            }
+        }
+
+        private void AddObjective(Objective objective)
+        {
+            Color color;
+            switch (objective.State)
+            {
+                case ObjectiveState.Complete:
+                    color = _objectiveDoneColor;
+                    break;
+                case ObjectiveState.Failed:
+                    color = _objectiveFailedColor;
+                    break;
+                case ObjectiveState.Waiting:
+                    color = WithAlpha(_objectiveColor, 0.35f);
+                    break;
+                default:
+                    color = _objectiveColor;
+                    break;
+            }
+
+            Vector3 center = WorldMapping.ToWorld(objective.Center, MarkerHeight * 0.5f);
+            switch (objective.Kind)
+            {
+                case ObjectiveKind.SeizeZone:
+                    AddCircleOutline(center, objective.Radius, color, 48);
+                    break;
+                case ObjectiveKind.HoldZone:
+                    AddCircleOutline(center, objective.Radius, color, 48);
+                    AddCircleOutline(center, objective.Radius - 4f, color, 48);
+                    break;
+                case ObjectiveKind.DestroyTarget:
+                    AddCircleOutline(center, objective.Radius, color, 48);
+                    float arm = Mathf.Min(objective.Radius * 0.4f, 20f);
+                    AddLine(center + new Vector3(-arm, 0f, -arm), center + new Vector3(arm, 0f, arm), color);
+                    AddLine(center + new Vector3(-arm, 0f, arm), center + new Vector3(arm, 0f, -arm), color);
+                    break;
+                default:
+                    AddDashedCircle(center, objective.Radius, color, 48);
+                    break;
             }
         }
 
@@ -588,6 +656,8 @@ namespace MilitarySimulation.DebugView
             {
                 DrawLegend();
             }
+
+            DrawResultBanner(simulation);
         }
 
         private void DrawCommandPanel()
@@ -801,6 +871,7 @@ namespace MilitarySimulation.DebugView
             _panelStyle = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 13, wordWrap = false };
             _panelStyle.normal.textColor = Color.white;
             _legendStyle = new GUIStyle(_panelStyle) { richText = true, fontSize = 12 };
+            _bannerStyle = new GUIStyle(_panelStyle) { alignment = TextAnchor.MiddleCenter, fontSize = 22, fontStyle = FontStyle.Bold };
         }
 
         private void DrawLabels(Simulation simulation)
@@ -837,6 +908,19 @@ namespace MilitarySimulation.DebugView
                     ? $"접촉 {contact.ContactNumber}"
                     : $"접촉 {contact.ContactNumber} (소실 {simulation.FormatClock(contact.LastSeenSeconds)})";
                 DrawWorldLabel(contact.LastKnownPosition, label);
+            }
+
+            if (simulation.TryGetMission(_controller.PlayerSide, out Mission mission))
+            {
+                foreach (Objective objective in mission.Steps)
+                {
+                    DrawWorldLabel(objective.Center, $"목표: {objective.Name}");
+                }
+
+                foreach (Objective objective in mission.Constraints)
+                {
+                    DrawWorldLabel(objective.Center, $"방어: {objective.Name}");
+                }
             }
         }
 
@@ -909,6 +993,7 @@ namespace MilitarySimulation.DebugView
                 _textBuilder.AppendLine("본부 전멸 — 관전 모드 (명령 불가)");
             }
 
+            AppendMissionText(simulation);
             _textBuilder.AppendLine($"선택: {(selected != null ? selected.Name : "-")}");
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine(GetCursorText(simulation));
@@ -921,9 +1006,184 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine(
                 $"{KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.CancelKey)} 취소");
 
-            var rect = new Rect(PanelMargin, PanelMargin, 430f, _controller.IsSpectating ? 196f : 178f);
+            var content = new GUIContent(_textBuilder.ToString().TrimEnd());
+            var rect = new Rect(PanelMargin, PanelMargin, 430f, _panelStyle.CalcHeight(content, 430f));
             _uiRects.Add(rect);
-            GUI.Box(rect, _textBuilder.ToString(), _panelStyle);
+            GUI.Box(rect, content, _panelStyle);
+        }
+
+        /// <summary>
+        /// 임무 이름, 지금 단계와 진행, 방어 조건, 남은 시간.
+        /// 진행 수치는 구역 안의 아군이 실시간 보고 중일 때만 보여준다(본부가 아는 만큼).
+        /// </summary>
+        private void AppendMissionText(Simulation simulation)
+        {
+            if (!simulation.TryGetMission(_controller.PlayerSide, out Mission mission))
+            {
+                return;
+            }
+
+            _textBuilder.AppendLine($"임무: {mission.Name}");
+            if (mission.IsFinished)
+            {
+                _textBuilder.AppendLine($"  결과: {DisplayNames.Of(mission.Result)} — {mission.ResultReason}");
+                return;
+            }
+
+            Objective step = mission.CurrentStep;
+            if (step != null)
+            {
+                int index = 0;
+                for (int i = 0; i < mission.Steps.Count; i++)
+                {
+                    if (mission.Steps[i] == step)
+                    {
+                        index = i + 1;
+                    }
+                }
+
+                _textBuilder.AppendLine(
+                    $"  목표 {index}/{mission.Steps.Count}: {DescribeObjective(step)} — {GetObjectiveProgressText(simulation, step)}");
+            }
+
+            foreach (Objective constraint in mission.Constraints)
+            {
+                _textBuilder.AppendLine($"  방어: {constraint.Name} — {GetHoldProgressText(simulation, constraint)}");
+            }
+
+            if (mission.TimeLimitSeconds > 0)
+            {
+                int remaining = Mathf.Max(0, mission.TimeLimitSeconds - simulation.ElapsedSeconds);
+                _textBuilder.AppendLine($"  남은 시간 {remaining / 60:00}:{remaining % 60:00}");
+            }
+        }
+
+        private static string DescribeObjective(Objective objective)
+        {
+            switch (objective.Kind)
+            {
+                case ObjectiveKind.SeizeZone:
+                    return $"{objective.Name} 확보";
+                case ObjectiveKind.DestroyTarget:
+                    return $"{objective.Name} 폭파";
+                case ObjectiveKind.Exfiltrate:
+                    return $"{objective.Name}(으)로 철수";
+                default:
+                    return $"{objective.Name} 방어";
+            }
+        }
+
+        private string GetObjectiveProgressText(Simulation simulation, Objective objective)
+        {
+            if (objective.Kind == ObjectiveKind.Exfiltrate)
+            {
+                CountKnownInside(simulation, objective, out int inside, out int total);
+                return $"{inside}/{total}개 소대 도착";
+            }
+
+            if (HasLiveFriendlyInside(simulation, objective))
+            {
+                if (objective.Kind == ObjectiveKind.DestroyTarget)
+                {
+                    return $"작업 {objective.ProgressSeconds}/{objective.RequiredSeconds}초";
+                }
+
+                return objective.ProgressSeconds > 0
+                    ? $"확보 중 {objective.ProgressSeconds}/{objective.RequiredSeconds}초"
+                    : "구역 안에 적이 남아 있음";
+            }
+
+            if (HasStaleFriendlyInside(simulation, objective))
+            {
+                return "확인 불가 (구역 안 소대 통신 끊김)";
+            }
+
+            return objective.Kind == ObjectiveKind.DestroyTarget && objective.ProgressSeconds > 0
+                ? $"작업 {objective.ProgressSeconds}/{objective.RequiredSeconds}초에서 멈춤"
+                : "구역 안 아군 없음";
+        }
+
+        /// <summary>방어: 적의 확보 진행은 본부가 구역 안에서 적을 확인했을 때만 보여준다.</summary>
+        private string GetHoldProgressText(Simulation simulation, Objective constraint)
+        {
+            if (constraint.State == ObjectiveState.Failed)
+            {
+                return "상실";
+            }
+
+            foreach (Contact contact in simulation.GetIntel(_controller.PlayerSide).Contacts)
+            {
+                if (contact.Confidence == ContactConfidence.Confirmed && constraint.Contains(contact.LastKnownPosition))
+                {
+                    return constraint.ProgressSeconds > 0
+                        ? $"적 확보 시도 {constraint.ProgressSeconds}/{constraint.RequiredSeconds}초"
+                        : "구역 안에 적 확인";
+                }
+            }
+
+            return "방어 중";
+        }
+
+        private bool HasLiveFriendlyInside(Simulation simulation, Objective objective)
+        {
+            foreach (Platoon platoon in _controller.FriendlyPlatoons)
+            {
+                if (!platoon.IsDestroyed && simulation.IsReportingLive(platoon) && objective.Contains(platoon.Position))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasStaleFriendlyInside(Simulation simulation, Objective objective)
+        {
+            foreach (Platoon platoon in _controller.FriendlyPlatoons)
+            {
+                if (!simulation.IsReportingLive(platoon) && objective.Contains(_controller.GetKnownPosition(platoon)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>철수 구역 안 소대 수(플레이어가 아는 위치 기준)와 전투 불능이 아닌 것으로 알려진 소대 수.</summary>
+        private void CountKnownInside(Simulation simulation, Objective objective, out int inside, out int total)
+        {
+            inside = 0;
+            total = 0;
+            foreach (Platoon platoon in _controller.FriendlyPlatoons)
+            {
+                if (IsKnownDestroyed(platoon))
+                {
+                    continue;
+                }
+
+                total++;
+                if (objective.Contains(_controller.GetKnownPosition(platoon)))
+                {
+                    inside++;
+                }
+            }
+        }
+
+        /// <summary>임무가 끝나면 화면 위쪽 가운데에 결과를 크게 띄운다.</summary>
+        private void DrawResultBanner(Simulation simulation)
+        {
+            if (!simulation.TryGetMission(_controller.PlayerSide, out Mission mission) || !mission.IsFinished)
+            {
+                return;
+            }
+
+            const float width = 520f;
+            const float height = 64f;
+            // 왼쪽 위 상태 패널, 오른쪽 위 범례와 겹치지 않게 화면 위쪽 1/4 지점에 둔다.
+            var rect = new Rect((Screen.width - width) * 0.5f, Screen.height * 0.25f, width, height);
+            _uiRects.Add(rect);
+            GUI.Box(rect, $"{DisplayNames.Of(mission.Result)} — {mission.ResultReason}", _bannerStyle);
         }
 
         private void DrawLogPanel(Simulation simulation)

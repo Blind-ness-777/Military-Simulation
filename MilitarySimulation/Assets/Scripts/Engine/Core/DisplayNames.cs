@@ -58,5 +58,20 @@ namespace MilitarySimulation.Engine
                     return "자유 사격";
             }
         }
+
+        public static string Of(MissionResult result)
+        {
+            switch (result)
+            {
+                case MissionResult.Victory:
+                    return "임무 성공";
+                case MissionResult.Defeat:
+                    return "임무 실패";
+                case MissionResult.Draw:
+                    return "무승부";
+                default:
+                    return "진행 중";
+            }
+        }
     }
 }

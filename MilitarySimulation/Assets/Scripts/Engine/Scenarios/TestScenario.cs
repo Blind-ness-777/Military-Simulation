@@ -43,6 +43,15 @@ namespace MilitarySimulation.Engine
                 MoveMode.Normal,
                 false);
 
+            // 블루 임무: 능선 너머 적 진지 확보. 제한 시간 30분, 넘기면 실패.
+            var mission = new Mission(Side.Blue, "능선 너머 적 진지 확보")
+            {
+                TimeLimitSeconds = 30 * 60,
+                TimeoutResult = MissionResult.Defeat
+            };
+            mission.AddStep(new Objective(ObjectiveKind.SeizeZone, "적 진지", new Vec2(450f, 620f), 100f));
+            simulation.SetMission(mission);
+
             return simulation;
         }
 
