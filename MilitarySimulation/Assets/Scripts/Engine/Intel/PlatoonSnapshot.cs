@@ -26,6 +26,7 @@ namespace MilitarySimulation.Engine
             WatchBearingDegrees = platoon.WatchBearingDegrees;
             WatchArcDegrees = platoon.WatchArcDegrees;
             IsSelfDirected = platoon.IsSelfDirected;
+            ActiveWait = platoon.ActiveWait;
             Waypoints = new List<Waypoint>(platoon.Waypoints);
         }
 
@@ -45,6 +46,11 @@ namespace MilitarySimulation.Engine
         public float WatchBearingDegrees { get; }
         public float WatchArcDegrees { get; }
         public bool IsSelfDirected { get; }
+
+        /// <summary>보고 시점에 기다리던 대기 조건. null이면 대기 중이 아니었다.</summary>
+        public WaitCondition ActiveWait { get; }
+
+        public bool IsWaiting => ActiveWait != null;
 
         /// <summary>보고 시점에 수행 중이던 경로. 플레이어가 내린 명령 경로와 같다(자체 판단 중이 아니라면).</summary>
         public IReadOnlyList<Waypoint> Waypoints { get; }

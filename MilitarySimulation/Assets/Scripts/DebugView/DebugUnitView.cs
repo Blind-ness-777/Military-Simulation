@@ -23,8 +23,9 @@ namespace MilitarySimulation.DebugView
         private const float WatchArcAlpha = 0.3f;
         private const int LostContactFadeSeconds = 300;
         private const int CircleSegments = 16;
-        private const float CommandPanelWidth = 400f;
-        private const float CommandPanelHeight = 190f;
+        private const float CommandPanelWidth = 480f;
+        private const float CommandPanelHeight = 300f;
+        private const float WaitMarkerSize = 7f;
         private const float PanelMargin = 10f;
         private const float RowLabelWidth = 96f;
         private const float StaleReportAlpha = 0.45f;
@@ -46,6 +47,7 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _objectiveColor = new Color(0.3f, 0.9f, 1f);
         [SerializeField] private Color _objectiveDoneColor = new Color(0.35f, 1f, 0.45f);
         [SerializeField] private Color _objectiveFailedColor = new Color(1f, 0.25f, 0.2f);
+        [SerializeField] private Color _waitPointColor = new Color(0.4f, 1f, 0.8f);
 
         /// <summary>
         /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
@@ -272,6 +274,7 @@ namespace MilitarySimulation.DebugView
                 {
                     AddDashedLine(previous, waypoint.Position, color);
                     AddSquareOutline(WorldMapping.ToWorld(waypoint.Position, MarkerHeight), 3f, color);
+                    AddWaitMarker(waypoint, color.a);
                     previous = waypoint.Position;
                 }
             }
@@ -479,8 +482,29 @@ namespace MilitarySimulation.DebugView
                 Vector3 next = WorldMapping.ToWorld(waypoint.Position, MarkerHeight);
                 AddLine(previous, next, pathColor);
                 AddSquareOutline(next, 3f, pathColor);
+                AddWaitMarker(waypoint, color.a);
                 previous = next;
             }
+        }
+
+        /// <summary>대기 지점은 웨이포인트 사각형 바깥에 마름모를 하나 더 그린다. 조건 글자는 이름표(DrawWaitLabels)로.</summary>
+        private void AddWaitMarker(Waypoint waypoint, float alpha)
+        {
+            if (!waypoint.HasWait)
+            {
+                return;
+            }
+
+            Vector3 center = WorldMapping.ToWorld(waypoint.Position, MarkerHeight);
+            Color color = WithAlpha(_waitPointColor, alpha);
+            var north = center + new Vector3(0f, 0f, WaitMarkerSize);
+            var east = center + new Vector3(WaitMarkerSize, 0f, 0f);
+            var south = center + new Vector3(0f, 0f, -WaitMarkerSize);
+            var west = center + new Vector3(-WaitMarkerSize, 0f, 0f);
+            AddLine(north, east, color);
+            AddLine(east, south, color);
+            AddLine(south, west, color);
+            AddLine(west, north, color);
         }
 
         /// <summary>
@@ -687,29 +711,24 @@ namespace MilitarySimulation.DebugView
             bool canCommand = !_controller.IsSpectating && selected != null && !IsKnownUnableToTakeOrders(selected);
             GUI.enabled = canCommand;
 
+            // 그리드 3행은 키보드 배열(Q W E R / A S D F / Z X C V)과 칸 위치를 맞춘다.
             GUILayout.BeginHorizontal();
             GUILayout.Label("이동 방식", GUILayout.Width(RowLabelWidth));
-            DrawMoveModeButton(MoveMode.Fast);
-            DrawMoveModeButton(MoveMode.Normal);
-            DrawMoveModeButton(MoveMode.Stealth);
+            DrawMoveModeButton(MoveMode.Fast, _controller.FastKey);
+            DrawMoveModeButton(MoveMode.Normal, _controller.NormalKey);
+            DrawMoveModeButton(MoveMode.Stealth, _controller.StealthKey);
+            if (CommandButton($"정지 [{KeyName(_controller.HoldKey)}]", false))
+            {
+                _controller.HoldSelected();
+            }
+
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("접촉 시", GUILayout.Width(RowLabelWidth));
-            DrawContactBehaviorButton(ContactBehavior.TakeCover);
-            DrawContactBehaviorButton(ContactBehavior.PushThrough);
-            DrawContactBehaviorButton(ContactBehavior.FallBack);
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("사격 방침", GUILayout.Width(RowLabelWidth));
-            DrawFirePolicyButton(selected, FirePolicy.Free);
-            DrawFirePolicyButton(selected, FirePolicy.CloseOnly);
-            DrawFirePolicyButton(selected, FirePolicy.HoldFire);
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("명령", GUILayout.Width(RowLabelWidth));
+            DrawContactBehaviorButton(ContactBehavior.TakeCover, _controller.TakeCoverKey);
+            DrawContactBehaviorButton(ContactBehavior.PushThrough, _controller.PushThroughKey);
+            DrawContactBehaviorButton(ContactBehavior.FallBack, _controller.FallBackKey);
             if (CommandButton($"경계 [{KeyName(_controller.WatchKey)}]", _controller.IsTargetingWatch))
             {
                 if (_controller.IsTargetingWatch)
@@ -722,9 +741,64 @@ namespace MilitarySimulation.DebugView
                 }
             }
 
-            if (CommandButton($"정지 [{KeyName(_controller.HoldKey)}]", false))
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("대기 조건", GUILayout.Width(RowLabelWidth));
+            string signalText = _controller.OrderWaitSignal > 0 ? $"신호 {_controller.OrderWaitSignal}" : "신호";
+            if (CommandButton($"{signalText} [{KeyName(_controller.SignalWaitKey)}]", _controller.OrderWaitSignal > 0))
             {
-                _controller.HoldSelected();
+                _controller.CycleOrderWaitSignal();
+            }
+
+            if (CommandButton($"H시 [{KeyName(_controller.HHourWaitKey)}]", _controller.OrderWaitAtHHour))
+            {
+                _controller.ToggleOrderWaitAtHHour();
+            }
+
+            DrawPlanPlatoonButton(PlanEventKind.Contact, "접촉", _controller.OrderWaitContactPlatoon, _controller.ContactWaitKey);
+            DrawPlanPlatoonButton(PlanEventKind.Arrival, "도착", _controller.OrderWaitArrivalPlatoon, _controller.ArrivalWaitKey);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("해제 시 사격", GUILayout.Width(RowLabelWidth));
+            DrawReleaseFirePolicyButton(null);
+            DrawReleaseFirePolicyButton(FirePolicy.Free);
+            DrawReleaseFirePolicyButton(FirePolicy.CloseOnly);
+            DrawReleaseFirePolicyButton(FirePolicy.HoldFire);
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("사격 방침", GUILayout.Width(RowLabelWidth));
+            DrawFirePolicyButton(selected, FirePolicy.Free);
+            DrawFirePolicyButton(selected, FirePolicy.CloseOnly);
+            DrawFirePolicyButton(selected, FirePolicy.HoldFire);
+            GUILayout.EndHorizontal();
+            GUI.enabled = !_controller.IsSpectating;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("신호 발신", GUILayout.Width(RowLabelWidth));
+            for (int i = 0; i < _controller.SendSignalKeys.Count && i < WaitCondition.MaxSignal; i++)
+            {
+                if (CommandButton($"{i + 1} [{KeyName(_controller.SendSignalKeys[i])}]", false))
+                {
+                    _controller.SendSignal(i + 1);
+                }
+            }
+
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("H시", GUILayout.Width(RowLabelWidth));
+            if (CommandButton($"- [{KeyName(_controller.HHourEarlierKey)}]", false))
+            {
+                _controller.AdjustHHour(-60);
+            }
+
+            GUILayout.Label(GetHHourText(), GUILayout.Width(150f));
+            if (CommandButton($"+ [{KeyName(_controller.HHourLaterKey)}]", false))
+            {
+                _controller.AdjustHHour(60);
             }
 
             GUILayout.EndHorizontal();
@@ -734,20 +808,51 @@ namespace MilitarySimulation.DebugView
             GUILayout.EndArea();
         }
 
-        private void DrawMoveModeButton(MoveMode moveMode)
+        private void DrawMoveModeButton(MoveMode moveMode, Key key)
         {
-            if (CommandButton(DisplayNames.Of(moveMode), _controller.OrderMoveMode == moveMode))
+            if (CommandButton($"{DisplayNames.Of(moveMode)} [{KeyName(key)}]", _controller.OrderMoveMode == moveMode))
             {
                 _controller.SetOrderMoveMode(moveMode);
             }
         }
 
-        private void DrawContactBehaviorButton(ContactBehavior contactBehavior)
+        private void DrawContactBehaviorButton(ContactBehavior contactBehavior, Key key)
         {
-            if (CommandButton(DisplayNames.Of(contactBehavior), _controller.OrderContactBehavior == contactBehavior))
+            if (CommandButton($"{DisplayNames.Of(contactBehavior)} [{KeyName(key)}]", _controller.OrderContactBehavior == contactBehavior))
             {
                 _controller.SetOrderContactBehavior(contactBehavior);
             }
+        }
+
+        /// <summary>접촉/도착 조건 버튼. 대상이 정해져 있으면 이름을, 대상 지정 중이면 강조해서 보여준다.</summary>
+        private void DrawPlanPlatoonButton(PlanEventKind kind, string label, Platoon target, Key key)
+        {
+            string text = target != null ? $"{target.Name} {label}" : label;
+            bool active = target != null || _controller.TargetingPlanPlatoon == kind;
+            if (CommandButton($"{text} [{KeyName(key)}]", active))
+            {
+                _controller.TogglePlanPlatoonCondition(kind);
+            }
+        }
+
+        private void DrawReleaseFirePolicyButton(FirePolicy? firePolicy)
+        {
+            string text = firePolicy.HasValue ? DisplayNames.Of(firePolicy.Value) : "유지";
+            if (CommandButton(text, _controller.OrderReleaseFirePolicy == firePolicy))
+            {
+                _controller.SetOrderReleaseFirePolicy(firePolicy);
+            }
+        }
+
+        private string GetHHourText()
+        {
+            if (!_controller.TryGetDisplayedHHour(out int hHour))
+            {
+                return "미지정";
+            }
+
+            string text = _controller.Simulation.FormatClock(hHour);
+            return _controller.IsHHourDraftPending ? $"{text} (하달 대기)" : text;
         }
 
         private void DrawFirePolicyButton(Platoon selected, FirePolicy firePolicy)
@@ -795,12 +900,44 @@ namespace MilitarySimulation.DebugView
                 return $"지도를 좌클릭해 경계 방향 지정 (우클릭·{KeyName(_controller.CancelKey)} 취소)";
             }
 
+            if (_controller.TargetingPlanPlatoon != PlanEventKind.None)
+            {
+                return $"조건 대상 소대를 좌클릭 (자기 소대 = 내가 적을 발견하면) · 우클릭·{KeyName(_controller.CancelKey)} 취소";
+            }
+
+            if (_controller.HasOrderWait || _controller.OrderReleaseFirePolicy.HasValue)
+            {
+                return $"다음 웨이포인트: {GetNextWaypointPlanText()} — 우클릭으로 찍기";
+            }
+
             if (selected.Comms == CommsState.Cut)
             {
                 return $"{selected.Name}: 통신 두절 — 명령은 회복될 때까지 보류됨";
             }
 
             return $"{KeyName(_controller.WatchKey)}: 커서 방향 경계 · 이동 방식·접촉 시는 다음 이동 명령에";
+        }
+
+        private string GetNextWaypointPlanText()
+        {
+            string text = _controller.HasOrderWait
+                ? "대기 " + DisplayNames.Of(new WaitCondition(
+                    _controller.OrderWaitSignal,
+                    _controller.OrderWaitAtHHour,
+                    _controller.OrderWaitContactPlatoon,
+                    _controller.OrderWaitArrivalPlatoon))
+                : "대기 없음";
+            if (_controller.OrderReleaseFirePolicy.HasValue)
+            {
+                text += $", 해제 시 {DisplayNames.Of(_controller.OrderReleaseFirePolicy.Value)}";
+            }
+
+            if (_controller.OrderWaitAtHHour && !_controller.TryGetDisplayedHHour(out _))
+            {
+                text += $" (H시 미지정 — {KeyName(_controller.HHourEarlierKey)} {KeyName(_controller.HHourLaterKey)}로 지정)";
+            }
+
+            return text;
         }
 
         /// <summary>
@@ -845,7 +982,7 @@ namespace MilitarySimulation.DebugView
 
             foreach (PendingOrder order in simulation.PendingOrders)
             {
-                if (order.Platoon != platoon)
+                if (order.Platoon != platoon || order.Kind == OrderKind.PlanNotice)
                 {
                     continue;
                 }
@@ -902,6 +1039,8 @@ namespace MilitarySimulation.DebugView
                 DrawWorldLabel(platoon.Position, label);
             }
 
+            DrawWaitLabels(simulation);
+
             foreach (Contact contact in simulation.GetIntel(_controller.PlayerSide).Contacts)
             {
                 string label = contact.Confidence == ContactConfidence.Confirmed
@@ -920,6 +1059,40 @@ namespace MilitarySimulation.DebugView
                 foreach (Objective objective in mission.Constraints)
                 {
                     DrawWorldLabel(objective.Center, $"방어: {objective.Name}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 대기 지점의 조건 글자("◇ 신호 1"). 플레이어가 아는 경로 기준(보고가 끊긴 소대는 마지막 보고의 경로)과
+        /// 도착 전 이동 명령의 경로.
+        /// </summary>
+        private void DrawWaitLabels(Simulation simulation)
+        {
+            foreach (Platoon platoon in _controller.FriendlyPlatoons)
+            {
+                IReadOnlyList<Waypoint> path = _controller.TryGetStaleReport(platoon, out FriendlyReport report)
+                    ? report.Snapshot.Waypoints
+                    : platoon.Waypoints;
+                DrawWaitLabels(path);
+            }
+
+            foreach (PendingOrder order in simulation.PendingOrders)
+            {
+                if (order.Kind == OrderKind.Move && order.Platoon.Side == _controller.PlayerSide)
+                {
+                    DrawWaitLabels(order.Waypoints);
+                }
+            }
+        }
+
+        private void DrawWaitLabels(IReadOnlyList<Waypoint> path)
+        {
+            foreach (Waypoint waypoint in path)
+            {
+                if (waypoint.HasWait)
+                {
+                    DrawWorldLabel(waypoint.Position, $"◇ {DisplayNames.Of(waypoint.Wait)}");
                 }
             }
         }
@@ -1002,9 +1175,11 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine(
                 $"{KeyName(_controller.PauseKey)} 일시정지 · 1~{_controller.SpeedStepCount} 배속 · {KeyName(_controller.NextPlatoonKey)} 다음 소대");
             _textBuilder.AppendLine(
-                $"{KeyName(_controller.WatchKey)} 커서 방향 경계 · {KeyName(_controller.HoldKey)} 정지 · {KeyName(_controller.TruthKey)} 실제 전황");
+                $"명령은 패널 칸과 같은 그리드 키 · {KeyName(_controller.WatchKey)} 커서 방향 경계 · {KeyName(_controller.HoldKey)} 정지");
             _textBuilder.AppendLine(
-                $"{KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.CancelKey)} 취소");
+                $"F1~F3 신호 발신 · {KeyName(_controller.HHourEarlierKey)} {KeyName(_controller.HHourLaterKey)} H시 조정");
+            _textBuilder.AppendLine(
+                $"{KeyName(_controller.TruthKey)} 실제 전황 · {KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.CancelKey)} 취소");
 
             var content = new GUIContent(_textBuilder.ToString().TrimEnd());
             var rect = new Rect(PanelMargin, PanelMargin, 430f, _panelStyle.CalcHeight(content, 430f));
@@ -1234,6 +1409,7 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"{Swatch(_contactColor, "□")} 적 접촉 (소실, 점점 흐려짐)");
             _textBuilder.AppendLine($"{Swatch(_fireColor, "—")} 사격");
             _textBuilder.AppendLine($"{Swatch(_pendingOrderColor, "- -")} 도착 전 명령");
+            _textBuilder.AppendLine($"{Swatch(_waitPointColor, "◇")} 대기 지점 (조건이 풀리면 출발)");
             _textBuilder.Append($"{Swatch(_jammingColor, "○")} 재밍 구역");
             if (_controller.ShowTruth)
             {
@@ -1261,6 +1437,10 @@ namespace MilitarySimulation.DebugView
                     return "Esc";
                 case Key.Space:
                     return "Space";
+                case Key.LeftBracket:
+                    return "[";
+                case Key.RightBracket:
+                    return "]";
                 default:
                     return key.ToString();
             }
@@ -1270,19 +1450,19 @@ namespace MilitarySimulation.DebugView
         {
             return FormatState(
                 platoon.IsDestroyed, platoon.IsBroken, platoon.IsMoving, platoon.CurrentMoveMode,
-                platoon.IsWatching, platoon.WatchBearingDegrees, platoon.IsPinned, platoon.IsFiring);
+                platoon.IsWatching, platoon.WatchBearingDegrees, platoon.IsPinned, platoon.IsFiring, platoon.ActiveWait);
         }
 
         private static string GetStateText(PlatoonSnapshot snapshot)
         {
             return FormatState(
                 snapshot.IsDestroyed, snapshot.IsBroken, snapshot.IsMoving, snapshot.CurrentMoveMode,
-                snapshot.IsWatching, snapshot.WatchBearingDegrees, snapshot.IsPinned, snapshot.IsFiring);
+                snapshot.IsWatching, snapshot.WatchBearingDegrees, snapshot.IsPinned, snapshot.IsFiring, snapshot.ActiveWait);
         }
 
         private static string FormatState(
             bool isDestroyed, bool isBroken, bool isMoving, MoveMode moveMode,
-            bool isWatching, float watchBearingDegrees, bool isPinned, bool isFiring)
+            bool isWatching, float watchBearingDegrees, bool isPinned, bool isFiring, WaitCondition activeWait)
         {
             if (isDestroyed)
             {
@@ -1295,7 +1475,11 @@ namespace MilitarySimulation.DebugView
             }
 
             string state;
-            if (isMoving)
+            if (activeWait != null)
+            {
+                state = $"대기: {DisplayNames.Of(activeWait)}";
+            }
+            else if (isMoving)
             {
                 state = $"{DisplayNames.Of(moveMode)} 이동";
             }

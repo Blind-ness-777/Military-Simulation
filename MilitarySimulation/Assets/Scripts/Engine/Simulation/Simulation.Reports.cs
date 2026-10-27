@@ -59,13 +59,20 @@ namespace MilitarySimulation.Engine
         /// <summary>소대가 겪은 사건을 본부에 보고한다. 본부 쪽 로그(통신 상태, 명령 발신)는 Log를 그대로 쓴다.</summary>
         private void Report(Platoon platoon, string text)
         {
+            Report(platoon, text, PlanEventKind.None);
+        }
+
+        /// <summary>계획 사건(접촉·도착)을 함께 알리는 보고. 본부가 받는 순간 그 사건을 기다리는 소대에 통지가 나간다.</summary>
+        private void Report(Platoon platoon, string text, PlanEventKind planEvent)
+        {
             if (IsReportingLive(platoon))
             {
                 Log(platoon.Side, text);
+                OnPlanEventKnown(platoon, planEvent);
                 return;
             }
 
-            Enqueue(new ReportEntry(platoon, ReportKind.Event, ElapsedSeconds) { Text = text });
+            Enqueue(new ReportEntry(platoon, ReportKind.Event, ElapsedSeconds) { Text = text, PlanEvent = planEvent });
         }
 
         private void ReportSighting(Platoon observer, Platoon target, bool isFirstSighting)
@@ -195,6 +202,7 @@ namespace MilitarySimulation.Engine
             {
                 case ReportKind.Event:
                     Log(platoon.Side, entry.Text + FormatObservedSuffix(entry.ObservedAtSeconds));
+                    OnPlanEventKnown(platoon, entry.PlanEvent);
                     break;
 
                 case ReportKind.Sighting:
@@ -249,6 +257,7 @@ namespace MilitarySimulation.Engine
             Log(intel.Side,
                 $"{observer.Name}: {kind} — 접촉 {contact.ContactNumber}, 방위 {bearing:000} 약 {RoundDistance(distance)}m ({Map.GetGridReference(targetPosition)})"
                 + FormatObservedSuffix(observedAtSeconds));
+            OnPlanEventKnown(observer, PlanEventKind.Contact);
         }
 
         /// <summary>늦게 도착한 보고에는 관측 시각을 붙인다. 로그 시각은 도착 시각이다.</summary>
