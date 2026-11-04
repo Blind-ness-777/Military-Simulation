@@ -6,10 +6,11 @@ namespace MilitarySimulation.Engine
     /// <summary>
     /// 시뮬레이션 본체. 실제 상태(진실)를 갖고, 고정 1초 틱으로 진행한다.
     /// 틱 순서: 통신 판정 → 명령 도착 → 보고 도착 → 지휘관 AI 판단 → 대기 해제 → 이동 → 탐지(소대 인지 갱신, 보고 발신) → 교전(동시 사격)
-    ///          → 제압·사기 → 접촉 시 행동 → 자체 판단 모드 → 상태 보고 → 임무 판정 → 인원 검산.
+    ///          → 제압·사기 → 접촉 시 행동 → 제압 시 엄폐 이동 → 자체 판단 모드 → 상태 보고 → 임무 판정 → 인원 검산.
     /// 임무 결과가 나면(IsFinished) 더 진행하지 않는다.
     /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs,
-    /// 지휘관 AI 연결은 Simulation.Commander.cs, 계획 명령(대기·신호·H시)은 Simulation.Plans.cs에 있다(같은 클래스를 파일만 나눔).
+    /// 지휘관 AI 연결은 Simulation.Commander.cs, 계획 명령(대기·신호·H시)은 Simulation.Plans.cs,
+    /// 엄폐 찾기·제압 중 이동은 Simulation.Cover.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
     public partial class Simulation
     {
@@ -118,6 +119,7 @@ namespace MilitarySimulation.Engine
             UpdateCombat();
             UpdateSuppressionAndMorale();
             UpdateContactReactions();
+            UpdatePinnedCover();
             UpdateSelfDirected();
             QueueStatusReports();
             UpdateMissions();
@@ -220,7 +222,13 @@ namespace MilitarySimulation.Engine
                         Waypoint reached = platoon.Waypoints[0];
                         platoon.RemoveReachedWaypoint();
 
-                        if (reached.HasWait)
+                        if (platoon.IsMovingToCover)
+                        {
+                            // 스스로 간 엄폐라 계획 사건(○소대 도착)이 아니다.
+                            platoon.FinishCoverMove();
+                            Report(platoon, $"{platoon.Name} {Map.GetGridReference(target)} 엄폐");
+                        }
+                        else if (reached.HasWait)
                         {
                             // 대기 지점: 멈춰 서서 조건을 기다린다(UpdateWaits). 도착도 계획 사건이다.
                             platoon.BeginWait(reached);
@@ -541,7 +549,7 @@ namespace MilitarySimulation.Engine
             }
 
             platoon.IsPinned = pinned;
-            Report(platoon, pinned ? $"{platoon.Name} 제압됨 — 이동 불가" : $"{platoon.Name} 제압 해소");
+            Report(platoon, pinned ? $"{platoon.Name} 제압됨 — 전진 불가" : $"{platoon.Name} 제압 해소");
         }
 
         private void UpdateBroken(Platoon platoon, bool underFire)
@@ -638,8 +646,18 @@ namespace MilitarySimulation.Engine
             switch (platoon.CurrentContactBehavior)
             {
                 case ContactBehavior.TakeCover:
+                    // 남은 경로는 취소하고, 엄폐 밖이면 가까운 엄폐로 간 뒤 멈춘다.
                     platoon.Hold();
-                    Report(platoon, $"{platoon.Name} 접촉 — 엄폐 후 응사");
+                    if (TryFindCover(platoon, out Vec2 coverPoint, out bool alreadyInCover) && !alreadyInCover)
+                    {
+                        platoon.StartCoverMove(coverPoint, false);
+                        Report(platoon, $"{platoon.Name} 접촉 — {Map.GetGridReference(coverPoint)} 엄폐로 이동, 응사");
+                    }
+                    else
+                    {
+                        Report(platoon, $"{platoon.Name} 접촉 — 엄폐 후 응사");
+                    }
+
                     break;
 
                 case ContactBehavior.PushThrough:
@@ -672,12 +690,6 @@ namespace MilitarySimulation.Engine
 
         private float GetMoveSpeed(Platoon platoon)
         {
-            // 붕괴한 부대는 제압 여부와 상관없이 후퇴한다(공황 후퇴).
-            if (platoon.IsPinned && !platoon.IsBroken)
-            {
-                return 0f;
-            }
-
             UnitType unitType = platoon.UnitType;
             float speed;
             switch (platoon.CurrentMoveMode)
@@ -701,6 +713,13 @@ namespace MilitarySimulation.Engine
                 case TerrainType.Road:
                     speed *= unitType.RoadSpeedMultiplier;
                     break;
+            }
+
+            // 제압되면 위협 쪽으로는 거의 못 가고, 옆·뒤·엄폐 쪽으로는 느리게 간다.
+            // 붕괴한 부대는 제압 여부와 상관없이 후퇴한다(공황 후퇴).
+            if (platoon.IsPinned && !platoon.IsBroken)
+            {
+                return speed * GetPinnedSpeedFactor(platoon);
             }
 
             return speed * (1f - platoon.Suppression / 100f * Rules.SuppressionSpeedReduction);

@@ -6,7 +6,7 @@ namespace MilitarySimulation.Engine
     /// </summary>
     public enum ContactBehavior
     {
-        /// <summary>그 자리에서 멈추고 엄폐한 뒤 응사한다. 남은 경로는 취소된다.</summary>
+        /// <summary>가까운 엄폐(숲, 아는 위협에서 시야가 가리는 곳, 반경 RulesConfig.CoverSearchRadius)로 간 뒤 멈춰 응사한다. 엄폐가 없으면 그 자리에서 멈춘다. 남은 경로는 취소된다.</summary>
         TakeCover,
 
         /// <summary>멈추지 않고 계속 이동하며 응사한다.</summary>

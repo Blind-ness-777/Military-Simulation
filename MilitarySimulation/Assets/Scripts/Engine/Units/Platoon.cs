@@ -98,8 +98,22 @@ namespace MilitarySimulation.Engine
         /// <summary>제압(0~100). 사격을 받으면 오르고, 받지 않으면 내려간다.</summary>
         public float Suppression { get; internal set; }
 
-        /// <summary>제압이 심해 움직이지 못하는 상태.</summary>
+        /// <summary>제압이 심해 위협 쪽으로 거의 나아가지 못하는 상태. 옆·뒤·엄폐 쪽으로는 느리게 움직일 수 있다.</summary>
         public bool IsPinned { get; internal set; }
+
+        /// <summary>
+        /// 명령이 아니라 소대가 스스로(접촉 시 엄폐 후 응사, 제압된 채 엄폐 밖에 있을 때) 가까운 엄폐로 가는 중인지.
+        /// 새 명령·붕괴 후퇴 등 다른 경로가 생기면 풀린다.
+        /// </summary>
+        public bool IsMovingToCover { get; private set; }
+
+        /// <summary>엄폐 이동을 마치면 되살릴 경계(경계 중에 제압돼 엄폐로 기어간 경우).</summary>
+        private bool _restoreWatchAfterCover;
+        private float _restoreWatchBearing;
+        private float _restoreWatchArc;
+
+        /// <summary>제압된 채 엄폐를 못 찾았을 때 다시 찾아볼 시각(경과 초). 매 틱 엄폐를 다시 훑지 않게 한다.</summary>
+        internal int NextCoverSearchSeconds { get; set; }
 
         /// <summary>사기 붕괴. 사격하지 않고 명령도 받지 않는다. 붕괴 순간 적 반대 방향으로 후퇴한다.</summary>
         public bool IsBroken { get; internal set; }
@@ -190,6 +204,7 @@ namespace MilitarySimulation.Engine
 
             _waypoints.AddRange(waypoints);
             IsWatching = false;
+            ClearCoverMove();
         }
 
         internal void SetWatch(float bearingDegrees, float arcDegrees)
@@ -200,6 +215,7 @@ namespace MilitarySimulation.Engine
             WatchBearingDegrees = Bearing.Normalize(bearingDegrees);
             WatchArcDegrees = arcDegrees;
             FacingDegrees = WatchBearingDegrees;
+            ClearCoverMove();
         }
 
         internal void Hold()
@@ -207,6 +223,48 @@ namespace MilitarySimulation.Engine
             ClearPlan();
             _waypoints.Clear();
             IsWatching = false;
+            ClearCoverMove();
+        }
+
+        /// <summary>
+        /// 가까운 엄폐로 스스로 이동한다. 대기·신호·통지는 건드리지 않는다(명령이 아니라 반응이라서).
+        /// keepWatch면 지금 경계를 기억했다가 엄폐에 닿으면 되살린다.
+        /// </summary>
+        internal void StartCoverMove(Vec2 coverPoint, bool keepWatch)
+        {
+            bool restoreWatch = keepWatch && IsWatching;
+            float bearing = WatchBearingDegrees;
+            float arc = WatchArcDegrees;
+
+            _waypoints.Clear();
+            SegmentStart = Position;
+            _waypoints.Add(new Waypoint(coverPoint, MoveMode.Normal, ContactBehavior.PushThrough));
+            IsWatching = false;
+
+            IsMovingToCover = true;
+            _restoreWatchAfterCover = restoreWatch;
+            _restoreWatchBearing = bearing;
+            _restoreWatchArc = arc;
+        }
+
+        /// <summary>엄폐 이동을 마친다. 기억해 둔 경계가 있으면 되살린다.</summary>
+        internal void FinishCoverMove()
+        {
+            if (_restoreWatchAfterCover)
+            {
+                IsWatching = true;
+                WatchBearingDegrees = _restoreWatchBearing;
+                WatchArcDegrees = _restoreWatchArc;
+                FacingDegrees = WatchBearingDegrees;
+            }
+
+            ClearCoverMove();
+        }
+
+        private void ClearCoverMove()
+        {
+            IsMovingToCover = false;
+            _restoreWatchAfterCover = false;
         }
 
         internal void RemoveReachedWaypoint()
