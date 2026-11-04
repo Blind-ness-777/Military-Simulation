@@ -63,11 +63,26 @@ namespace MilitarySimulation.Engine
         /// <summary>제압 100일 때 사격 인원이 줄어드는 비율.</summary>
         public float SuppressionFireReduction = 0.7f;
 
-        /// <summary>제압 100일 때 이동 속도가 줄어드는 비율.</summary>
+        /// <summary>제압 100일 때 이동 속도가 줄어드는 비율. 제압된 동안(PinnedSuppression 이상)은 Pinned…SpeedFactor를 대신 쓴다.</summary>
         public float SuppressionSpeedReduction = 0.7f;
 
-        /// <summary>이 값 이상이면 움직이지 못한다(제압됨).</summary>
+        /// <summary>이 값 이상이면 제압된다(위협 쪽으로 거의 못 감).</summary>
         public float PinnedSuppression = 80f;
+
+        /// <summary>제압된 소대가 위협 쪽으로 갈 때 속도 비율(제압에 따른 속도 감소 대신 적용).</summary>
+        public float PinnedForwardSpeedFactor = 0.05f;
+
+        /// <summary>제압된 소대가 옆·뒤로, 또는 스스로 엄폐로 갈 때 속도 비율.</summary>
+        public float PinnedOtherSpeedFactor = 0.25f;
+
+        /// <summary>진행 방향이 가장 가까운 아는 위협에서 이 각도(전체 폭, 도) 안이면 "위협 쪽으로 전진"이다.</summary>
+        public float PinnedForwardArcDegrees = 120f;
+
+        /// <summary>엄폐를 찾는 반경(m). 숲 칸, 또는 아는 위협 전부에서 시야선이 가리는 칸.</summary>
+        public float CoverSearchRadius = 50f;
+
+        /// <summary>제압된 채 엄폐를 못 찾았을 때 다시 찾아보는 간격(초).</summary>
+        public int CoverSearchRetrySeconds = 10;
 
         // 사기 (0~100)
         public float InitialMorale = 100f;
