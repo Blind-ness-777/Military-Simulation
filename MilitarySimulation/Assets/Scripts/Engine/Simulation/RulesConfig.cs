@@ -146,5 +146,16 @@ namespace MilitarySimulation.Engine
 
         /// <summary>지나온 경로를 기록하는 간격(m).</summary>
         public float TrailSpacing = 25f;
+
+        // 격자 경로 탐색 (지휘관이 만드는 경로. 직접 이동 명령은 직선이라 쓰지 않는다)
+        public PathCostProfile FastPathCost = PathCostProfile.CreateFast();
+        public PathCostProfile NormalPathCost = PathCostProfile.CreateNormal();
+        public PathCostProfile StealthPathCost = PathCostProfile.CreateStealth();
+
+        /// <summary>경로 곡선화(Chaikin 모서리 깎기) 횟수. 0이면 편 경로를 그대로 쓴다.</summary>
+        public int PathSmoothingIterations = 2;
+
+        /// <summary>곡선화한 경로에서 웨이포인트 사이 최소 간격(m). 이보다 가까운 점은 뺀다.</summary>
+        public float PathMinWaypointSpacing = 5f;
     }
 }

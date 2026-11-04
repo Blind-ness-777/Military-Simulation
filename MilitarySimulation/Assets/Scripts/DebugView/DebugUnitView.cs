@@ -48,6 +48,7 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Color _objectiveDoneColor = new Color(0.35f, 1f, 0.45f);
         [SerializeField] private Color _objectiveFailedColor = new Color(1f, 0.25f, 0.2f);
         [SerializeField] private Color _waitPointColor = new Color(0.4f, 1f, 0.8f);
+        [SerializeField] private Color _keyTerrainColor = new Color(1f, 1f, 1f, 0.55f);
 
         /// <summary>
         /// 이번 프레임에 그린 패널 영역(IMGUI 좌표: 왼쪽 위 원점).
@@ -95,6 +96,11 @@ namespace MilitarySimulation.DebugView
             _triangleIndices.Clear();
 
             Simulation simulation = _controller.Simulation;
+            if (_controller.ShowKeyTerrain)
+            {
+                AddKeyTerrain(simulation);
+            }
+
             AddJammingZones(simulation);
             AddObjectives(simulation);
             AddFriendlyPlatoons(simulation);
@@ -340,6 +346,26 @@ namespace MilitarySimulation.DebugView
                 default:
                     AddDashedCircle(center, objective.Radius, color, 48);
                     break;
+            }
+        }
+
+        /// <summary>요지(영역 원)와 구간(점선, 구간 경로를 따라). 디버그 겹쳐 보기 — 지휘관이 생각하는 지도.</summary>
+        private void AddKeyTerrain(Simulation simulation)
+        {
+            KeyTerrainGraph graph = simulation.KeyTerrain;
+            foreach (KeyTerrainEdge edge in graph.Edges)
+            {
+                Vec2 previous = graph.Nodes[edge.FromIndex].Center;
+                foreach (Vec2 point in edge.Path)
+                {
+                    AddDashedLine(previous, point, _keyTerrainColor);
+                    previous = point;
+                }
+            }
+
+            foreach (KeyTerrain node in graph.Nodes)
+            {
+                AddCircleOutline(WorldMapping.ToWorld(node.Center, MarkerHeight * 0.5f), node.Radius, _keyTerrainColor, 32);
             }
         }
 
@@ -1041,6 +1067,14 @@ namespace MilitarySimulation.DebugView
 
             DrawWaitLabels(simulation);
 
+            if (_controller.ShowKeyTerrain)
+            {
+                foreach (KeyTerrain node in simulation.KeyTerrain.Nodes)
+                {
+                    DrawWorldLabel(node.Center, $"{node.Name} ({DisplayNames.Of(node.Kind)})");
+                }
+            }
+
             foreach (Contact contact in simulation.GetIntel(_controller.PlayerSide).Contacts)
             {
                 string label = contact.Confidence == ContactConfidence.Confirmed
@@ -1171,7 +1205,7 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"실제 전황 표시: {(_controller.ShowTruth ? "켬" : "끔")}");
             _textBuilder.AppendLine(GetCursorText(simulation));
             _textBuilder.AppendLine();
-            _textBuilder.AppendLine("좌클릭 소대 선택 · 우클릭 이동 (Shift 경로 추가)");
+            _textBuilder.AppendLine("좌클릭 소대 선택 · 우클릭 이동 (Shift 경로 추가, Ctrl 경로 탐색)");
             _textBuilder.AppendLine(
                 $"{KeyName(_controller.PauseKey)} 일시정지 · 1~{_controller.SpeedStepCount} 배속 · {KeyName(_controller.NextPlatoonKey)} 다음 소대");
             _textBuilder.AppendLine(
@@ -1179,7 +1213,7 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine(
                 $"F1~F3 신호 발신 · {KeyName(_controller.HHourEarlierKey)} {KeyName(_controller.HHourLaterKey)} H시 조정");
             _textBuilder.AppendLine(
-                $"{KeyName(_controller.TruthKey)} 실제 전황 · {KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.CancelKey)} 취소");
+                $"{KeyName(_controller.TruthKey)} 실제 전황 · {KeyName(_controller.LegendKey)} 범례 · {KeyName(_controller.KeyTerrainKey)} 요지 · {KeyName(_controller.CancelKey)} 취소");
 
             var content = new GUIContent(_textBuilder.ToString().TrimEnd());
             var rect = new Rect(PanelMargin, PanelMargin, 430f, _panelStyle.CalcHeight(content, 430f));
@@ -1411,6 +1445,10 @@ namespace MilitarySimulation.DebugView
             _textBuilder.AppendLine($"{Swatch(_pendingOrderColor, "- -")} 도착 전 명령");
             _textBuilder.AppendLine($"{Swatch(_waitPointColor, "◇")} 대기 지점 (조건이 풀리면 출발)");
             _textBuilder.Append($"{Swatch(_jammingColor, "○")} 재밍 구역");
+            if (_controller.ShowKeyTerrain)
+            {
+                _textBuilder.Append($"\n{Swatch(_keyTerrainColor, "○")} 요지 · {Swatch(_keyTerrainColor, "- -")} 구간 (디버그)");
+            }
             if (_controller.ShowTruth)
             {
                 _textBuilder.Append($"\n{Swatch(_truthColor, "○")} 실제 위치 (디버그)");
