@@ -64,6 +64,7 @@ namespace MilitarySimulation.Engine
             };
             mission.AddStep(new Objective(ObjectiveKind.SeizeZone, "적 진지", new Vec2(450f, 620f), 100f));
             simulation.SetMission(mission);
+            TestScenario.AddKeyTerrain(simulation);
 
             return simulation;
         }

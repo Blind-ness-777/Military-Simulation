@@ -31,6 +31,23 @@ namespace MilitarySimulation.Engine
             }
         }
 
+        public static string Of(KeyTerrainKind kind)
+        {
+            switch (kind)
+            {
+                case KeyTerrainKind.Hill:
+                    return "고지";
+                case KeyTerrainKind.ForestEdge:
+                    return "숲 가장자리";
+                case KeyTerrainKind.Chokepoint:
+                    return "길목";
+                case KeyTerrainKind.StagingArea:
+                    return "대기 지점";
+                default:
+                    return "사격 진지";
+            }
+        }
+
         public static string Of(CommsState commsState)
         {
             switch (commsState)

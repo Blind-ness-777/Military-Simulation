@@ -51,8 +51,29 @@ namespace MilitarySimulation.Engine
             };
             mission.AddStep(new Objective(ObjectiveKind.SeizeZone, "적 진지", new Vec2(450f, 620f), 100f));
             simulation.SetMission(mission);
+            AddKeyTerrain(simulation);
 
             return simulation;
+        }
+
+        /// <summary>
+        /// 이 지도의 요지(시나리오 데이터). DefenseScenario도 같은 지도라 같은 요지를 쓴다.
+        /// 남쪽(블루 출발) → 남서 숲 → 능선(y 500) → 능선 북쪽 진지들 순서. 동쪽은 도로(x 520)·동쪽 숲·동쪽 고지로 돌아가는 길.
+        /// 이름은 진영과 무관하게 지형으로 붙인다(양쪽 지휘관이 같은 요지를 쓴다).
+        /// </summary>
+        internal static void AddKeyTerrain(Simulation simulation)
+        {
+            simulation.AddKeyTerrain("남쪽 출발 지역", KeyTerrainKind.StagingArea, new Vec2(335f, 80f), 60f);
+            simulation.AddKeyTerrain("남서 숲", KeyTerrainKind.StagingArea, new Vec2(260f, 320f), 50f);
+            simulation.AddKeyTerrain("남서 숲 북쪽 가장자리", KeyTerrainKind.ForestEdge, new Vec2(300f, 405f), 30f);
+            simulation.AddKeyTerrain("능선 서쪽", KeyTerrainKind.Hill, new Vec2(300f, 505f), 40f);
+            simulation.AddKeyTerrain("능선 중앙", KeyTerrainKind.Hill, new Vec2(420f, 500f), 40f);
+            simulation.AddKeyTerrain("도로 능선 길목", KeyTerrainKind.Chokepoint, new Vec2(525f, 500f), 25f);
+            simulation.AddKeyTerrain("동쪽 고지", KeyTerrainKind.Hill, new Vec2(780f, 300f), 50f);
+            simulation.AddKeyTerrain("동쪽 숲 북쪽 가장자리", KeyTerrainKind.ForestEdge, new Vec2(670f, 425f), 35f);
+            simulation.AddKeyTerrain("중앙 진지", KeyTerrainKind.FirePosition, new Vec2(450f, 620f), 50f);
+            simulation.AddKeyTerrain("동쪽 진지", KeyTerrainKind.FirePosition, new Vec2(700f, 600f), 40f);
+            simulation.AddKeyTerrain("북쪽 후방", KeyTerrainKind.StagingArea, new Vec2(575f, 790f), 50f);
         }
 
         /// <summary>DefenseScenario도 같은 지도를 쓴다(시야 조건을 이미 확인한 지도라서).</summary>

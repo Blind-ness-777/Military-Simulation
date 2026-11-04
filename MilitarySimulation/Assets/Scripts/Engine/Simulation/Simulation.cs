@@ -10,7 +10,7 @@ namespace MilitarySimulation.Engine
     /// 임무 결과가 나면(IsFinished) 더 진행하지 않는다.
     /// 명령·통신·자체 판단은 Simulation.Command.cs, 소대 → 본부 보고는 Simulation.Reports.cs,
     /// 지휘관 AI 연결은 Simulation.Commander.cs, 계획 명령(대기·신호·H시)은 Simulation.Plans.cs,
-    /// 엄폐 찾기·제압 중 이동은 Simulation.Cover.cs에 있다(같은 클래스를 파일만 나눔).
+    /// 엄폐 찾기·제압 중 이동은 Simulation.Cover.cs, 요지 그래프·경로 탐색 연결은 Simulation.Terrain.cs에 있다(같은 클래스를 파일만 나눔).
     /// </summary>
     public partial class Simulation
     {

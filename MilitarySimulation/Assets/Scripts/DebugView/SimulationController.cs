@@ -57,6 +57,9 @@ namespace MilitarySimulation.DebugView
         [SerializeField] private Key _nextPlatoonKey = Key.Tab;
         [SerializeField] private Key _truthKey = Key.T;
         [SerializeField] private Key _legendKey = Key.L;
+
+        /// <summary>요지·구간 겹쳐 보기(지휘관이 생각하는 지도). 경로 탐색 이동은 Ctrl + 우클릭.</summary>
+        [SerializeField] private Key _keyTerrainKey = Key.G;
         [SerializeField] private Key _cancelKey = Key.Escape;
 
         [Header("그리드 1행: 이동 방식 / 정지")]
@@ -131,12 +134,16 @@ namespace MilitarySimulation.DebugView
         /// <summary>화면 기호 설명(범례) 표시 여부.</summary>
         public bool ShowLegend { get; private set; } = true;
 
+        /// <summary>true면 요지(원)와 구간(점선)을 지도에 겹쳐 그린다. 처음 켤 때 요지 그래프를 계산한다(1초 남짓).</summary>
+        public bool ShowKeyTerrain { get; private set; }
+
         public Key PauseKey => _pauseKey;
         public Key NextPlatoonKey => _nextPlatoonKey;
         public Key WatchKey => _watchKey;
         public Key HoldKey => _holdKey;
         public Key TruthKey => _truthKey;
         public Key LegendKey => _legendKey;
+        public Key KeyTerrainKey => _keyTerrainKey;
         public Key CancelKey => _cancelKey;
         public Key FastKey => _fastKey;
         public Key NormalKey => _normalKey;
@@ -493,6 +500,11 @@ namespace MilitarySimulation.DebugView
                 ShowLegend = !ShowLegend;
             }
 
+            if (keyboard[_keyTerrainKey].wasPressedThisFrame)
+            {
+                ShowKeyTerrain = !ShowKeyTerrain;
+            }
+
             if (keyboard[_cancelKey].wasPressedThisFrame)
             {
                 CancelTargeting();
@@ -585,12 +597,47 @@ namespace MilitarySimulation.DebugView
             }
 
             bool append = Keyboard.current != null && Keyboard.current.shiftKey.isPressed;
+            bool planPath = Keyboard.current != null && Keyboard.current.ctrlKey.isPressed;
             WaitCondition wait = HasOrderWait
                 ? new WaitCondition(OrderWaitSignal, OrderWaitAtHHour, OrderWaitContactPlatoon, OrderWaitArrivalPlatoon)
                 : null;
-            var waypoint = new Waypoint(CursorMapPosition, OrderMoveMode, OrderContactBehavior, wait, OrderReleaseFirePolicy);
-            _simulation.OrderMove(selected, new[] { waypoint }, append);
+
+            if (planPath)
+            {
+                OrderPlannedMove(selected, append, wait);
+            }
+            else
+            {
+                var waypoint = new Waypoint(CursorMapPosition, OrderMoveMode, OrderContactBehavior, wait, OrderReleaseFirePolicy);
+                _simulation.OrderMove(selected, new[] { waypoint }, append);
+            }
+
             ResetOrderWait();
+        }
+
+        /// <summary>
+        /// 경로 탐색 이동(디버그·QA용, Ctrl + 우클릭): 지휘관이 쓸 격자 경로 탐색으로 길을 만들어 웨이포인트 여러 개로 보낸다.
+        /// 노출 기준은 플레이어 진영 상황판의 접촉(확인·소실)이다. 대기 조건·해제 시 사격은 마지막 지점에만 붙는다.
+        /// 출발점은 플레이어가 아는 위치(경로 추가면 남은 경로의 끝).
+        /// </summary>
+        private void OrderPlannedMove(Platoon selected, bool append, WaitCondition wait)
+        {
+            Vec2 from = append && selected.Waypoints.Count > 0
+                ? selected.Waypoints[selected.Waypoints.Count - 1].Position
+                : GetKnownPosition(selected);
+            ExposureField exposure = _simulation.BuildContactExposure(PlayerSide);
+            List<Vec2> points = _simulation.PlanPath(from, CursorMapPosition, OrderMoveMode, exposure);
+
+            var waypoints = new List<Waypoint>(points.Count);
+            for (int i = 0; i < points.Count; i++)
+            {
+                bool last = i == points.Count - 1;
+                waypoints.Add(last
+                    ? new Waypoint(points[i], OrderMoveMode, OrderContactBehavior, wait, OrderReleaseFirePolicy)
+                    : new Waypoint(points[i], OrderMoveMode, OrderContactBehavior));
+            }
+
+            _simulation.OrderMove(selected, waypoints, append);
         }
 
         /// <summary>조건 대상 소대 지정 중: 좌클릭한 아군 소대(자기 소대 포함)를 조건에 건다. 우클릭은 취소.</summary>
